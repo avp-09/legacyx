@@ -95,8 +95,32 @@ export class Game {
       this.updateHUD();
       this.kalamSay(`Namaste! I am Kalam. ${lvl.mission}. Follow the golden glows!`);
     }
+    this.freePlayer(false); // guarantee spawn starts on open ground
+    this.stuckT = 0; this.stuckMark = null;
     showScreen('screen-game');
     this.updateHUD();
+  }
+
+  // Push the player out of any overlapping collider (spawn safety + watchdog).
+  freePlayer(loud = true) {
+    if (!this.player || !this.world) return;
+    const p = this.player.group.position;
+    for (let k = 0; k < 10; k++) {
+      let pushed = false;
+      for (const c of this.world.colliders) {
+        const dx = p.x - c.x, dz = p.z - c.z;
+        const d = Math.hypot(dx, dz), need = c.r + 0.9;
+        if (d < need) {
+          if (d < 1e-3) { p.x = c.x + need; }
+          else { p.x = c.x + dx / d * need; p.z = c.z + dz / d * need; }
+          pushed = true;
+        }
+      }
+      p.x = Math.max(-this.world.bounds, Math.min(this.world.bounds, p.x));
+      p.z = Math.max(-this.world.bounds, Math.min(this.world.bounds, p.z));
+      if (!pushed) break;
+    }
+    if (loud) toast('🌀 Squeezed out of a tight spot — follow the golden glows!');
   }
 
   loadFinalChamber() {
@@ -180,6 +204,17 @@ export class Game {
         k.rotation.y = this.player.heading;
       }
       this.checkInteract();
+      // anti-stuck watchdog: pushing against an obstacle with no progress
+      // for ~1.2s ejects the player to open ground (never a soft-lock).
+      const trying = inp.f || inp.b || inp.l || inp.r;
+      if (trying) {
+        this.stuckT = (this.stuckT || 0) + dt;
+        if (!this.stuckMark) this.stuckMark = p.clone();
+        if (this.stuckT > 1.2) {
+          if (p.distanceTo(this.stuckMark) < 0.12) this.freePlayer(true);
+          this.stuckT = 0; this.stuckMark = p.clone();
+        }
+      } else { this.stuckT = 0; this.stuckMark = null; }
     }
     (this.world.dynamics || []).forEach(fn => fn(dt, t, { gateOpen: this.quizPassed }));
     this.renderer.render(this.scene, this.camera);

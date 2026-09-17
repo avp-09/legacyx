@@ -257,6 +257,7 @@ export function buildWorld(THREE, scene, level) {
   // ================= LEVEL LAYOUTS =================
   const P = {
     gate: [0, -18], seal: [0, -13], portal: [8, -18],
+    spawn: [0, 10], // [x, z] — must be open ground (verified per level below)
     items: [], npcSpots: []
   };
 
@@ -309,7 +310,11 @@ export function buildWorld(THREE, scene, level) {
     [[6, 4], [8, 6], [-7, 2]].forEach(([x, z]) => {
       cyl(0.9, 1.1, 1.4, 0xd9c48f, x, z); H.colliders.push({ x, z, r: 1.2 });
     });
-    for (let i = 0; i < 8; i++) tree(-20 + R() * 40, -2 + R() * 16, 0.8 + R() * 0.5);
+    // garden grove — curated border positions (never random: random clusters
+    // can trap the player between trunks). All >=4 apart, off all paths.
+    [[-20, -2], [-20, 6], [-20, 12], [-10, 14], [10, 14], [20, 12], [20, 6], [20, -2]]
+      .forEach(([x, z]) => tree(x, z, 0.9 + R() * 0.3));
+    P.spawn = [0, 5]; // open courtyard: clear of library, stupas, stall, NPCs
     stall(4, -2, 0xe8c547); pot(1, 11); banner(0, 8, 0xe8c547); torch(-2, -16); torch(2, -16);
     P.items = [[-14, -10.5, 'scroll'], [0, 10.5, 'scroll'], [4.5, 6.5, 'scroll'], [-7, 3.5, 'scroll'], [10, -12, 'scroll']];
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
@@ -359,7 +364,7 @@ export function buildWorld(THREE, scene, level) {
     // palace block + garden
     box(6, 3, 5, 0xd9a860, -8, 8, 0, 0, 3.6);
     box(4, 2.2, 4, 0xb5884a, 8, 8, 0, 0, 3);
-    for (let i = 0; i < 6; i++) tree(-4 + i * 1.8, 12, 0.7);
+    for (let i = 0; i < 6; i++) tree(-4 + i * 2.6, 12, 0.7); // 2.6 spacing: gaps stay walkable
     stall(0, 6, 0xd97b2e); pot(1, 7); pot(-1, 7);
     banner(-6, 0, 0xd94f3d); banner(6, 0, 0xffd23e);
     torch(-13, -16); torch(13, -16); torch(0, -19);
@@ -389,6 +394,8 @@ export function buildWorld(THREE, scene, level) {
     stall(-6, 8, 0x4caf6d); pot(-5, 9);
     banner(2, 6, 0xff9933); torch(-12, 2); torch(8, -2);
     P.items = [[-12, 5.5, 'page'], [10, -1.5, 'page'], [12, 8.5, 'page'], [2, 8, 'page'], [-4, -10, 'page']];
+    P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
+    P.spawn = [0, 2]; // open street: clear of meeting hall, press, NPCs
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
   }
 
@@ -466,6 +473,6 @@ export function buildWorld(THREE, scene, level) {
   scene.add(pts);
   H.dynamics.push((dt, t) => { pts.rotation.y += dt * 0.02; pts.position.y = Math.sin(t * 0.7) * 0.3; });
 
-  H.spawn = [0, 0, 10];
+  H.spawn = [P.spawn[0], 0, P.spawn[1]];
   return H;
 }
