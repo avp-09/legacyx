@@ -1,0 +1,14 @@
+{
+  "name": "bharat-quest-guardians-of-time",
+  "version": "1.0.0",
+  "description": "Bharat Quest — Guardians of Time: a 3D educational adventure through Indian history (Three.js, zero build step).",
+  "type": "module",
+  "scripts": {
+    "dev": "npx serve . -l 8080",
+    "start": "python -m http.server 8080",
+    "test": "node --check js/main.js && node --check js/game.js && node --check js/world.js && node --check js/player.js && node --check js/data.js && node --check js/ui.js && node --check js/quiz.js && node --check js/puzzles.js && node --check js/save.js && node --check js/audio.js && node --check js/kalam.js && echo OK"
+  },
+  "devDependencies": {
+    "serve": "^14.2.0"
+  }
+}

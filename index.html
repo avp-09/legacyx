@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bharat Quest — Guardians of Time</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>">
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="fatal" class="hidden fatal"><h2>⚠️ Could not start 3D</h2><p id="fatal-msg"></p><p>Use a Chromium/Edge/Chrome browser with internet (Three.js CDN) and serve via <code>npx serve .</code></p></div>
+<div id="fade" class="hidden"></div>
+<div id="fx-layer"></div>
+
+<!-- 3D canvas -->
+<div id="screen-game" class="hidden">
+  <div id="game-canvas"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div class="hud-pill" id="hud-status">🧭 Explorer</div>
+      <div class="hud-mid">
+        <div id="hud-mission">Mission</div>
+        <div id="hud-progress">Progress</div>
+      </div>
+      <div class="hud-right">
+        <span class="hud-pill" id="hud-points">⭐ 0</span>
+        <span class="hud-pill" id="hud-art">🏺 0</span>
+        <span class="hud-pill" id="hud-seals">🔱 0/5</span>
+        <button class="icon-btn" id="btn-inv-hud" title="Inventory (I)">🎒</button>
+        <button class="icon-btn" id="btn-kalam-hud" title="Ask Kalam">🤖</button>
+        <button class="icon-btn" id="btn-pause" title="Pause (Esc)">⏸️</button>
+      </div>
+    </div>
+    <div id="hud-controls-hint">WASD move · Mouse-drag camera · <b>E</b> interact · <b>Space</b> jump · <b>I</b> bag · <b>Esc</b> pause</div>
+    <div id="interact-prompt" class="hidden"></div>
+  </div>
+
+  <!-- Mobile controls -->
+  <div id="mobile-ui">
+    <div id="joystick"><div id="joy-knob"></div></div>
+    <div id="mobile-btns">
+      <button id="btn-act" class="mbtn act">E</button>
+      <button id="btn-jump" class="mbtn">⤒</button>
+      <button id="btn-kalam-m" class="mbtn">🤖</button>
+      <button id="btn-inv" class="mbtn">🎒</button>
+    </div>
+  </div>
+
+  <!-- Dialogue -->
+  <div id="dialogue" class="hidden">
+    <div id="dlg-name">NPC</div>
+    <div id="dlg-text"></div>
+    <button class="btn primary" id="dlg-next">Continue →</button>
+  </div>
+
+  <!-- Quiz -->
+  <div id="quiz-modal" class="modal hidden">
+    <div class="panel">
+      <div class="panel-head"><span id="quiz-title">Quiz</span><button class="icon-btn" id="quiz-close">✕</button></div>
+      <div id="quiz-body"></div>
+    </div>
+  </div>
+
+  <!-- Puzzle -->
+  <div id="puzzle-modal" class="modal hidden">
+    <div class="panel">
+      <div class="panel-head"><span id="puzzle-title">Puzzle</span><button class="icon-btn" id="puzzle-close">✕</button></div>
+      <div id="puzzle-body"></div>
+    </div>
+  </div>
+
+  <!-- Inventory -->
+  <div id="inventory-panel" class="modal hidden">
+    <div class="panel small">
+      <div class="panel-head"><span>🎒 Inventory</span><button class="icon-btn" id="inv-close">✕</button></div>
+      <div id="inv-body"></div>
+    </div>
+  </div>
+
+  <!-- Kalam -->
+  <div id="kalam-panel" class="hidden">
+    <div class="panel-head"><span>🤖 KALAM · History Guide</span><button class="icon-btn" id="kalam-close">✕</button></div>
+    <div id="kalam-log"><div class="kalam-msg kalam">🤖 Kalam: Namaste! Ask me anything about history!</div></div>
+    <div class="kalam-chips">
+      <button class="kalam-chip">Why were drainage systems important?</button>
+      <button class="kalam-chip">Why is Nalanda important?</button>
+      <button class="kalam-chip">Tell me something interesting</button>
+    </div>
+    <div class="kalam-row"><input id="kalam-input" placeholder="Ask Kalam…" maxlength="200"><button class="btn primary" id="kalam-ask">Ask</button></div>
+  </div>
+
+  <!-- Pause -->
+  <div id="pause-menu" class="modal hidden">
+    <div class="panel small center">
+      <h2>⏸️ Paused</h2>
+      <button class="btn primary big" id="btn-continue">▶ Continue</button>
+      <button class="btn" id="btn-pause-kalam">🤖 Ask Kalam</button>
+      <button class="btn" id="btn-quit-map">🗺️ Chrono Map</button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results-modal" class="modal hidden">
+    <div class="panel small center results">
+      <h2 id="results-title">LEVEL COMPLETE!</h2>
+      <div id="results-seal" class="big-seal">🏺 Seal</div>
+      <div id="results-stars" class="stars">⭐⭐⭐</div>
+      <p id="results-detail"></p>
+      <button class="btn primary big" id="results-next">Next →</button>
+      <button class="btn ghost" id="results-map">🗺️ Chrono Map</button>
+    </div>
+  </div>
+
+  <!-- Victory -->
+  <div id="victory-modal" class="modal hidden">
+    <div class="panel center results">
+      <h2>🎉 BHARAT QUEST COMPLETE!</h2>
+      <div class="big-seal">🔱🔱🔱🔱🔱</div>
+      <p class="oath">“YOU HAVE BECOME A GUARDIAN OF TIME.”</p>
+      <p id="victory-stats"></p>
+      <button class="btn primary big" id="victory-map">🗺️ Explore the Chrono Map</button>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+  <div id="ach-pop" class="hidden"></div>
+</div>
+
+<!-- MAIN MENU -->
+<div id="screen-menu" class="screen">
+  <div class="menu-bg"></div>
+  <div class="menu-card">
+    <div class="flag">🇮🇳</div>
+    <h1 class="title">BHARAT QUEST</h1>
+    <div class="subtitle">✨ GUARDIANS OF TIME ✨</div>
+    <p class="tagline">Recover the five Time Seals. Travel Indian history. Become a Guardian of Time.</p>
+    <div class="menu-buttons">
+      <button class="btn primary big" id="btn-play">▶ PLAY</button>
+      <button class="btn" id="btn-resume">⏵ Continue Adventure</button>
+      <button class="btn" id="btn-levels">🗺️ LEVEL SELECT</button>
+      <button class="btn" id="btn-museum">🏺 HISTORY MUSEUM</button>
+      <button class="btn" id="btn-achv">🏆 ACHIEVEMENTS</button>
+      <button class="btn" id="btn-settings">⚙ SETTINGS</button>
+      <button class="btn demo" id="btn-demo">🎬 DEMO MODE (quick Level 1)</button>
+    </div>
+    <div id="menu-seals" class="menu-seals"></div>
+    <div class="menu-foot">WASD + Mouse · E interact · Space jump · Ages 9–15 · Progress auto-saves</div>
+  </div>
+</div>
+
+<!-- LEVEL SELECT -->
+<div id="screen-levels" class="screen hidden">
+  <div class="page">
+    <h2>🗺️ THE CHRONO MAP</h2>
+    <p class="tagline">Five portals. Five eras. Recover every Time Seal.</p>
+    <div id="level-cards"></div>
+    <button class="btn ghost" data-back>← Main Menu</button>
+  </div>
+</div>
+
+<!-- MUSEUM -->
+<div id="screen-museum" class="screen hidden">
+  <div class="page wide">
+    <h2>🏺 HISTORY MUSEUM</h2>
+    <p class="tagline" id="museum-count"></p>
+    <div id="museum-grid"></div>
+    <button class="btn ghost" data-back>← Main Menu</button>
+  </div>
+</div>
+
+<!-- ACHIEVEMENTS -->
+<div id="screen-achv" class="screen hidden">
+  <div class="page">
+    <h2>🏆 ACHIEVEMENTS</h2>
+    <div id="achv-list"></div>
+    <button class="btn ghost" data-back>← Main Menu</button>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="screen-settings" class="screen hidden">
+  <div class="page">
+    <h2>⚙ SETTINGS</h2>
+    <label class="set-row"><input type="checkbox" id="set-music" checked> 🎵 Background music</label>
+    <label class="set-row"><input type="checkbox" id="set-sfx" checked> 🔊 Sound effects</label>
+    <label class="set-row">✨ Graphics <select id="set-quality"><option value="high">High</option><option value="low">Low (faster)</option></select></label>
+    <button class="btn danger" id="btn-reset">🗑️ Reset all progress</button>
+    <br><button class="btn ghost" data-back>← Main Menu</button>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
