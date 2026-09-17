@@ -288,7 +288,7 @@ export function buildWorld(THREE, scene, level) {
     stall(-6, 4, 0xd94f3d); stall(-9, 4, 0x3d7bd9, 0.2);
     pot(-7, 5); pot(-7.6, 5.3); pot(11, 3);
     tree(16, -12); tree(-18, -10); tree(18, 12); banner(-11, -2, 0xd94f3d); torch(0, -16); torch(3, -16);
-    P.items = [[-6, 5.5, 'tablet'], [3, -6.5, 'tablet'], [-2, -5, 'tablet'], [-11, 12.5, 'tablet'], [13, 11, 'tablet']];
+    P.items = [[-4.5, 6.5, 'tablet'], [2, 7.5, 'tablet'], [2.5, -8, 'tablet'], [-9, 0, 'tablet'], [7, 13, 'tablet']];
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
   } else if (level.id === 2) {
     // Nalanda: courtyards, stupas, library, observatory, gardens
@@ -311,7 +311,7 @@ export function buildWorld(THREE, scene, level) {
     });
     for (let i = 0; i < 8; i++) tree(-20 + R() * 40, -2 + R() * 16, 0.8 + R() * 0.5);
     stall(4, -2, 0xe8c547); pot(1, 11); banner(0, 8, 0xe8c547); torch(-2, -16); torch(2, -16);
-    P.items = [[-14, -10.5, 'scroll'], [0, 10.5, 'scroll'], [7, 5, 'scroll'], [-7, 3.5, 'scroll'], [10, -12, 'scroll']];
+    P.items = [[-14, -10.5, 'scroll'], [0, 10.5, 'scroll'], [4.5, 6.5, 'scroll'], [-7, 3.5, 'scroll'], [10, -12, 'scroll']];
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
   } else if (level.id === 3) {
     // Chola: giant temple, gopuram colours, port with boats, village
@@ -392,18 +392,8 @@ export function buildWorld(THREE, scene, level) {
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
   }
 
-  // ---------- spawn collectibles ----------
-  const kind = COLLECT_GEO[level.id] || 'tablet';
-  const names = (ARTIFACT_INFO[level.id] || []).map(a => a.name);
-  P.items.forEach(([x, z], i) => {
-    const mesh = collectMesh(kind);
-    mesh.position.set(x, 0, z);
-    scene.add(mesh);
-    glowRing(x, z);
-    H.collectibles.push({ i, mesh, pos: new THREE.Vector3(x, 0, z), name: names[i] || level.collectible.name, taken: false });
-  });
-
-  // ---------- NPCs ----------
+  // ---------- NPCs (placed BEFORE collectibles so the safety solver
+  // accounts for their space too) ----------
   level.npcs.forEach(def => {
     const { grp } = npcMesh(def.color, def.icon);
     grp.position.set(def.pos[0], 0, def.pos[2]);
@@ -412,6 +402,40 @@ export function buildWorld(THREE, scene, level) {
     H.colliders.push({ x: def.pos[0], z: def.pos[2], r: 0.8 });
     H.dynamics.push((dt, t) => { grp.position.y = Math.abs(Math.sin(t * 1.8 + def.pos[0])) * 0.08; grp.rotation.y = Math.sin(t * 0.6 + def.pos[2]) * 0.5; });
     H.npcs.push({ def, mesh: grp });
+  });
+
+  // ---------- spawn collectibles ----------
+  // Safety: nudge any item out of building/prop/NPC colliders so it is always
+  // visible and reachable (regression guard — items must never spawn inside meshes).
+  function clearSpot(x, z) {
+    for (let k = 0; k < 60; k++) {
+      let px = 0, pz = 0, bad = false;
+      for (const c of H.colliders) {
+        const dx = x - c.x, dz = z - c.z;
+        const d = Math.hypot(dx, dz), need = c.r + 1.2;
+        if (d < need) {
+          bad = true;
+          if (d < 1e-3) { px += need; }
+          else { const w = (need - d) / d; px += dx * w; pz += dz * w; }
+        }
+      }
+      if (!bad) break;
+      if (Math.hypot(px, pz) < 0.05) { px += 0.7; pz += 0.35; } // escape symmetric traps
+      x += px; z += pz;
+      x = Math.max(-H.bounds + 1.5, Math.min(H.bounds - 1.5, x));
+      z = Math.max(-H.bounds + 1.5, Math.min(H.bounds - 1.5, z));
+    }
+    return [x, z];
+  }
+  const kind = COLLECT_GEO[level.id] || 'tablet';
+  const names = (ARTIFACT_INFO[level.id] || []).map(a => a.name);
+  P.items.forEach(([ix, iz], i) => {
+    const [x, z] = clearSpot(ix, iz);
+    const mesh = collectMesh(kind);
+    mesh.position.set(x, 0, z);
+    scene.add(mesh);
+    glowRing(x, z);
+    H.collectibles.push({ i, mesh, pos: new THREE.Vector3(x, 0, z), name: names[i] || level.collectible.name, taken: false });
   });
 
   // ---------- KALAM companion bot (follows at distance, hovers) ----------
