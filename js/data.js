@@ -1,5 +1,5 @@
 // ============================================================
-// BHARAT QUEST — data-driven historical content
+// LEGACY: THE LIVING CITY — data-driven historical content
 // All questions / NPCs / artifacts / levels live here so new
 // eras can be added without touching game logic.
 // ============================================================
@@ -215,7 +215,7 @@ export const ACHIEVEMENTS = [
   { id: 'scholar', icon: '🧠', name: 'HISTORY SCHOLAR', desc: 'Score 5/5 on any quiz.' },
   { id: 'explorer', icon: '🗺️', name: 'EXPLORER', desc: 'Find all collectibles in a level.' },
   { id: 'guardian', icon: '🔱', name: 'GUARDIAN OF TIME', desc: 'Collect all five Time Seals.' },
-  { id: 'master', icon: '🏆', name: 'BHARAT QUEST MASTER', desc: 'Complete the entire game.' }
+  { id: 'master', icon: '🏆', name: 'LEGACY MASTER', desc: 'Complete the entire game.' }
 ];
 
 export const KALAM_KB = [

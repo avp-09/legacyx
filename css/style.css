@@ -16,8 +16,22 @@ button{font-family:inherit}
 .menu-card{position:relative;max-width:560px;width:100%;background:linear-gradient(180deg,#fffdf4,#ffe9c4);border-radius:22px;padding:30px 28px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.5),0 0 0 6px rgba(255,210,62,.35);animation:rise .5s ease}
 @keyframes rise{from{transform:translateY(18px);opacity:0}to{transform:none;opacity:1}}
 .flag{font-size:44px}
+/* LEGACY brand emblem: radiant medallion with orbiting spark */
+.emblem{position:relative;width:104px;height:104px;margin:0 auto}
+.emblem-ring{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,#ffd23e,#e8641c,#7a4de8,#35e0ff,#ffd23e);animation:spin 9s linear infinite;box-shadow:0 0 26px rgba(255,210,62,.65)}
+.emblem-ring::after{content:"";position:absolute;inset:7px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3a2a6a,#1a1040)}
+.emblem-core{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:48px;filter:drop-shadow(0 3px 6px rgba(0,0,0,.5))}
+.emblem-orbit{position:absolute;left:50%;top:50%;width:120px;height:120px;margin:-60px 0 0 -60px;animation:spin 5s linear infinite;pointer-events:none}
+.emblem-orbit::before{content:"✨";position:absolute;top:-4px;left:50%;font-size:20px}
+@keyframes spin{to{transform:rotate(360deg)}}
 .title{margin:6px 0 0;font-size:52px;letter-spacing:3px;color:#b53a12;text-shadow:0 2px 0 #ffe9a8}
+.title.legacy{font-size:64px;letter-spacing:10px;margin-left:10px;background:linear-gradient(100deg,#8a3c0c 10%,#e8641c 30%,#ffd23e 50%,#e8641c 70%,#8a3c0c 90%);background-size:220% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer 4s linear infinite;filter:drop-shadow(0 2px 0 rgba(255,233,168,.9))}
+@keyframes shimmer{to{background-position:220% center}}
 .subtitle{letter-spacing:5px;color:#7a4de8;font-weight:800;margin:4px 0 8px}
+.rule{display:flex;align-items:center;gap:10px;color:#b53a12;margin:2px 0 6px}
+.rule::before,.rule::after{content:"";flex:1;height:2px;background:linear-gradient(90deg,transparent,#b53a12,transparent)}
+.skyline{font-size:26px;letter-spacing:6px;filter:drop-shadow(0 4px 4px rgba(0,0,0,.25));animation:floaty 3.5s ease-in-out infinite}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 .tagline{color:#6a4a26}
 .menu-buttons{display:flex;flex-direction:column;gap:10px;margin:18px 0}
 .menu-seals{background:#2a1608;color:var(--gold);border-radius:12px;padding:10px;font-weight:700}
@@ -181,6 +195,7 @@ button{font-family:inherit}
 
 @media (max-width:720px){
   .title{font-size:36px}
+  .title.legacy{font-size:44px;letter-spacing:6px}
   .hud-mid{max-width:52vw}
   #hud-mission{font-size:12px}
   #hud-controls-hint{display:none}

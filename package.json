@@ -1,7 +1,7 @@
 {
-  "name": "bharat-quest-guardians-of-time",
+  "name": "legacy-the-living-city",
   "version": "1.0.0",
-  "description": "Bharat Quest — Guardians of Time: a 3D educational adventure through Indian history (Three.js, zero build step).",
+  "description": "LEGACY: The Living City — a Guardians of Time 3D adventure through Indian history (Three.js, zero build step).",
   "type": "module",
   "scripts": {
     "dev": "npx serve . -l 8080",

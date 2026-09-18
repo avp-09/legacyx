@@ -1,6 +1,6 @@
-# 🇮🇳 BHARAT QUEST — Guardians of Time
+# 🏛️ LEGACY — The Living City
 
-A playable 3D educational adventure through Indian history, built for a hackathon demo (ages 9–15).
+A playable 3D **Guardians of Time** adventure through Indian history, built for a hackathon demo (ages 9–15).
 Zero build step — pure **Three.js (CDN) + vanilla JS modules**.
 
 ## ▶ Run it
