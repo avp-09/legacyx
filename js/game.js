@@ -97,6 +97,8 @@ export class Game {
     }
     this.freePlayer(false); // guarantee spawn starts on open ground
     this.stuckT = 0; this.stuckMark = null;
+    this.discovered = new Set(); // landmark discoveries reset per visit
+    document.getElementById('discover-card').classList.add('hidden');
     showScreen('screen-game');
     this.updateHUD();
   }
@@ -215,6 +217,15 @@ export class Game {
           this.stuckT = 0; this.stuckMark = p.clone();
         }
       } else { this.stuckT = 0; this.stuckMark = null; }
+      // landmark discovery: walking into a famous place pops its story card
+      if (!this.finalMode && this.world.landmarks) {
+        for (const lm of this.world.landmarks) {
+          const key = this.levelId + '|' + lm.title;
+          if (this.discovered.has(key)) continue;
+          const dx = p.x - lm.x, dz = p.z - lm.z;
+          if (dx * dx + dz * dz < lm.r * lm.r) { this.discoverLandmark(lm, key); break; }
+        }
+      }
     }
     (this.world.dynamics || []).forEach(fn => fn(dt, t, { gateOpen: this.quizPassed }));
     this.renderer.render(this.scene, this.camera);
@@ -392,6 +403,20 @@ export class Game {
       },
       onClose: () => { this.busy = false; }
     });
+  }
+
+  discoverLandmark(lm, key) {
+    this.discovered.add(key);
+    Save.addPoints(5);
+    AudioSys.collect();
+    this.updateHUD();
+    document.getElementById('disc-icon').textContent = lm.icon;
+    document.getElementById('disc-title').textContent = lm.title;
+    document.getElementById('disc-fact').textContent = lm.fact;
+    const card = document.getElementById('discover-card');
+    card.classList.remove('hidden');
+    clearTimeout(card._h);
+    card._h = setTimeout(() => card.classList.add('hidden'), 4200);
   }
 
   // ================= DIALOGUE / KALAM =================

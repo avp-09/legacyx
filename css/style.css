@@ -165,6 +165,13 @@ button{font-family:inherit}
 #ach-pop{position:absolute;left:50%;top:150px;transform:translateX(-50%);background:linear-gradient(180deg,#fff6d8,#ffe9a8);border:3px solid var(--gold);color:#5a3a10;padding:12px 20px;border-radius:16px;font-weight:800;z-index:51;display:flex;gap:10px;align-items:center;box-shadow:0 12px 40px rgba(0,0,0,.4)}
 #ach-pop.pop{animation:toastpop .35s ease}
 .ach-icon{font-size:30px}
+/* discovery card */
+#discover-card{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;background:linear-gradient(180deg,#2a1a3a,#1a1040);border:2px solid var(--gold);color:#ffe9a8;border-radius:16px;padding:12px 20px;z-index:22;max-width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.55);animation:discin .4s ease}
+@keyframes discin{from{transform:translateX(-50%) translateY(24px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}
+#disc-icon{font-size:36px}
+#disc-kicker{font-size:11px;letter-spacing:2px;color:var(--gold);font-weight:900}
+#disc-title{font-size:19px;font-weight:900;color:#fff}
+#disc-fact{font-size:13px;opacity:.9;margin-top:2px}
 #fx-layer{position:fixed;inset:0;pointer-events:none;z-index:60}
 .spark{position:absolute;font-size:20px;animation:spark .9s ease-out forwards}
 @keyframes spark{to{transform:translate(var(--dx),var(--dy)) scale(.4);opacity:0}}
