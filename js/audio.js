@@ -39,7 +39,7 @@ export const AudioSys = {
     this.stopMusic();
     if (!musicOn) return;
     const c = ac(); if (!c) return;
-    const roots = { 1: 220, 2: 247, 3: 262, 4: 233, 5: 294, 6: 277 };
+    const roots = { 1: 220, 2: 247, 3: 262, 4: 233, 5: 277 };
     const root = roots[levelId] || 220;
     const scale = [1, 9 / 8, 5 / 4, 3 / 2, 5 / 3, 2];
     let step = 0;

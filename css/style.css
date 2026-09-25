@@ -182,6 +182,18 @@ button{font-family:inherit}
 /* discovery card */
 #discover-card{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;background:linear-gradient(180deg,#2a1a3a,#1a1040);border:2px solid var(--gold);color:#ffe9a8;border-radius:16px;padding:12px 20px;z-index:22;max-width:min(480px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.55);animation:discin .4s ease}
 @keyframes discin{from{transform:translateX(-50%) translateY(24px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}
+/* quest UI: mission kicker, artifact panel, journal chips, dialogue choices */
+.kicker{font-size:12px;letter-spacing:3px;color:#7a4de8;font-weight:900}
+.art-name{font-size:20px;font-weight:900;color:#b53a12;margin:4px 0}
+.art-points{font-weight:900;color:#2e9e4f;margin:8px 0 12px}
+.j-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.j-chip{background:#efe6d4;border-radius:99px;padding:5px 11px;font-size:13px;font-weight:700}
+.j-chip.done{background:#d9f5df;border:1px solid #2e9e4f}
+.j-chip.now{background:#fff3d4;border:2px solid #d9a800}
+#dlg-choices{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+#dlg-choices:empty{display:none}
+.btn.choice{background:#fff;border:2px solid #7a4de8;color:#3a2a6a;text-align:left}
+.btn.choice:hover{background:#efe8ff}
 #disc-icon{font-size:36px}
 #disc-kicker{font-size:11px;letter-spacing:2px;color:var(--gold);font-weight:900}
 #disc-title{font-size:19px;font-weight:900;color:#fff}

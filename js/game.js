@@ -19,6 +19,7 @@ export class Game {
     this.world = null; this.player = null;
     this.levelId = 1; this.found = 0; this.quizPassed = false;
     this.sealReady = false; this.portalReady = false; this.levelDone = false;
+    this.qIndex = -1; this.quest = null; this.waypoint = null; this.wpDist = null; this.dlgCb = null;
     this.dialogue = null; this.busy = false; // modal open
     this.camYaw = 0; this.camPitch = 0.42; this.camDist = 8.5;
     this.input = { f: false, b: false, l: false, r: false, run: false, jump: false };
@@ -69,11 +70,12 @@ export class Game {
   startLevel(id, opts = {}) {
     AudioSys.init();
     this.busy = false;
-    ['quiz-modal', 'puzzle-modal', 'results-modal', 'victory-modal', 'pause-menu', 'dialogue', 'inventory-panel'].forEach(m => document.getElementById(m).classList.add('hidden'));
-    this.finalMode = (id === 6);
+    ['quiz-modal', 'puzzle-modal', 'results-modal', 'victory-modal', 'pause-menu', 'dialogue', 'inventory-panel', 'mission-modal', 'artifact-modal', 'journal-modal'].forEach(m => document.getElementById(m).classList.add('hidden'));
+    this.finalMode = (id === 5);
     this.levelId = id;
     this.inGame = true;
     this.scene.clear();
+    this.waypoint = null;
     if (this.finalMode) {
       this.loadFinalChamber();
     } else {
@@ -83,17 +85,21 @@ export class Game {
       this.player.onStep = () => AudioSys.step();
       this.player.onJump = () => AudioSys.jump();
       this.found = 0; this.quizPassed = false; this.sealReady = false; this.portalReady = false; this.levelDone = false;
-      if (opts.demo) { // hackathon demo: pre-find 3 to show loop fast
-        let n = 0;
-        for (const c of this.world.collectibles) {
-          if (n >= 3) break;
-          this.takeCollectible(c, true); n++;
-        }
-        setTimeout(() => toast(`🎬 DEMO MODE — 3 ${lvl.collectible.name}s pre-found! Find ${lvl.collectible.target - 3} more!`, 3400), 600);
+      this.quest = lvl.quest; this.qIndex = -1;
+      this.makeWaypoint();
+      this.setQuestVisuals();
+      this.renderJournal();
+      if (opts.demo) { // hackathon demo: briefing done for you, first 3 in order
+        this.qIndex = 0;
+        [0, 1, 2].forEach(i => { const c = this.world.collectibles[i]; if (c) this.collectNow(c, true); });
+        this.qIndex = 3; this.setQuestVisuals(); this.renderJournal();
+        setTimeout(() => toast(`🎬 DEMO MODE — briefing done, 3 tablets found in order! Follow the ▼ to Artifact 4!`, 3600), 600);
+      } else {
+        this.showMission(); // busy until dismissed
       }
       AudioSys.music(id);
       this.updateHUD();
-      this.kalamSay(`Namaste! I am Kalam. ${lvl.mission}. Follow the golden glows!`);
+      this.kalamSay(`Namaste! I am Kalam. ${lvl.mission}.`);
     }
     this.freePlayer(false); // guarantee spawn starts on open ground
     this.stuckT = 0; this.stuckMark = null;
@@ -123,6 +129,154 @@ export class Game {
       if (!pushed) break;
     }
     if (loud) toast('🌀 Squeezed out of a tight spot — follow the golden glows!');
+  }
+
+  // ================= SEQUENTIAL QUEST SYSTEM =================
+  makeWaypoint() {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    g.font = '88px serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = '#ffd23e'; g.shadowBlur = 18;
+    g.fillStyle = '#ffd23e'; g.fillText('▼', 64, 62);
+    this.waypoint = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false, color: 0xffe9a8
+    }));
+    this.waypoint.scale.set(1.5, 1.5, 1);
+    this.scene.add(this.waypoint);
+  }
+
+  giverNPC() {
+    if (!this.world || !this.quest) return null;
+    return this.world.npcs.find(n => n.def.name === this.quest.giver) || this.world.npcs[0] || null;
+  }
+
+  questTarget() {
+    if (this.finalMode || !this.world) return null;
+    const lvl = levelById(this.levelId);
+    if (this.portalReady) return { pos: this.world.portal.pos, y: 4.6 };
+    if (this.sealReady && !this.levelDone) return { pos: this.world.seal.pos, y: 2.6 };
+    if (this.quizPassed) return { pos: this.world.gate.pos, y: 5.6 };
+    if (this.qIndex < 0) { const g = this.giverNPC(); return g ? { pos: g.mesh.position, y: 2.9 } : null; }
+    if (this.qIndex < lvl.collectible.target) {
+      const c = this.world.collectibles[this.qIndex];
+      return c && !c.taken ? { pos: c.pos, y: 2.3 } : null;
+    }
+    return { pos: this.world.gate.pos, y: 5.6 };
+  }
+
+  currentObjective() {
+    if (this.finalMode) return 'Attempt the Final Challenge';
+    const lvl = levelById(this.levelId);
+    if (this.portalReady) return `Enter the portal to ${lvl.portalTo}`;
+    if (this.levelDone) return 'Level complete!';
+    if (this.sealReady) return 'Collect the Time Seal';
+    if (this.quizPassed) return 'Solve the puzzle mechanism';
+    const n = lvl.collectible.target;
+    if (this.qIndex < 0) return `Talk to ${this.quest?.giver || 'the guide'}`;
+    if (this.qIndex < n) return `Find Artifact ${this.qIndex + 1} of ${n}`;
+    return 'Enter the History Gate';
+  }
+
+  currentClue() {
+    if (this.finalMode || !this.quest) return '';
+    if (this.qIndex < 0) return `Find ${this.quest.giver} — follow the golden ▼ marker.`;
+    if (this.qIndex < this.quest.artifacts.length) return this.quest.artifacts[this.qIndex].clue;
+    return this.quest.done;
+  }
+
+  // Only the active artifact glows; the rest wait sealed and dim.
+  setQuestVisuals() {
+    if (!this.world || this.finalMode) return;
+    for (const c of this.world.collectibles) {
+      const u = c.mesh.userData || {};
+      const active = !c.taken && c.i === this.qIndex;
+      if (u.halo) u.halo.visible = active;
+      if (u.core && u.core.material && 'emissiveIntensity' in u.core.material)
+        u.core.material.emissiveIntensity = c.taken ? 0 : active ? 0.55 : 0.07;
+      c.mesh.scale.setScalar(active ? 1.15 : 1);
+    }
+  }
+
+  showMission() {
+    const lvl = levelById(this.levelId);
+    this.busy = true;
+    document.getElementById('mission-kicker').textContent = `NEW MISSION · LEVEL ${lvl.id}`;
+    document.getElementById('mission-title').textContent = lvl.name.toUpperCase();
+    document.getElementById('mission-era').textContent = lvl.era;
+    document.getElementById('mission-text').textContent = lvl.quest.brief;
+    document.getElementById('mission-objective').textContent = `🎯 First objective: talk to ${lvl.quest.giver}.`;
+    document.getElementById('mission-modal').classList.remove('hidden');
+    AudioSys.portal();
+  }
+
+  dismissMission() {
+    AudioSys.click();
+    document.getElementById('mission-modal').classList.add('hidden');
+    this.busy = false;
+    this.renderJournal(); this.updateHUD();
+    toast(`🎯 OBJECTIVE: Talk to ${this.quest.giver}. Follow the golden ▼!`, 3600);
+  }
+
+  showArtifactFound(c) {
+    const lvl = levelById(this.levelId);
+    const info = (ARTIFACT_INFO[this.levelId] || [])[c.i] || {};
+    const n = lvl.collectible.target;
+    document.getElementById('art-icon').textContent = lvl.collectible.icon;
+    document.getElementById('art-title').textContent = `ARTIFACT ${c.i + 1} OF ${n} FOUND!`;
+    document.getElementById('art-name').textContent = info.name || c.name;
+    document.getElementById('art-fact').textContent = info.fact || '';
+    document.getElementById('art-points').textContent = `+${lvl.collectible.points} HISTORY POINTS`;
+    document.getElementById('artifact-modal').classList.remove('hidden');
+    this.busy = true;
+    AudioSys.success();
+  }
+
+  dismissArtifact() {
+    AudioSys.click();
+    document.getElementById('artifact-modal').classList.add('hidden');
+    this.busy = false;
+    const lvl = levelById(this.levelId);
+    const n = lvl.collectible.target;
+    this.qIndex++;
+    this.setQuestVisuals();
+    this.renderJournal(); this.updateHUD();
+    if (this.qIndex >= n) {
+      this.kalamSay(lvl.quest.done);
+      setTimeout(() => { toast('🔱 HISTORY GATE UNLOCKED! Walk to the glowing gate.', 3400); AudioSys.portal(); }, 400);
+    } else {
+      const qa = lvl.quest.artifacts[this.qIndex];
+      this.kalamSay(lvl.quest.artifacts[this.qIndex - 1].praise);
+      toast(`🔍 NEW CLUE — Artifact ${this.qIndex + 1}: ${qa.clue}`, 5200);
+    }
+  }
+
+  renderJournal() {
+    const body = document.getElementById('journal-body');
+    if (!body) return;
+    if (this.finalMode || !this.quest) {
+      body.innerHTML = `<div class="inv-row">🏆 <b>Final History Chamber</b> — answer questions from all four eras.</div>`;
+      return;
+    }
+    const lvl = levelById(this.levelId);
+    const n = lvl.collectible.target;
+    const chips = this.quest.artifacts.map((a, i) =>
+      `<span class="j-chip ${i < this.found ? 'done' : i === this.qIndex ? 'now' : ''}">${i < this.found ? '✅' : `#${i + 1}`} ${a.name}</span>`
+    ).join('');
+    const facts = (ARTIFACT_INFO[this.levelId] || []).slice(0, this.found)
+      .map(f => `<div class="inv-row">📜 <b>${f.name}</b> — ${f.fact}</div>`).join('');
+    body.innerHTML = `
+      <div class="inv-row">🗺️ <b>${lvl.name}</b> · <small>${lvl.era}</small></div>
+      <div class="inv-row">🎯 <b>Objective:</b> ${this.currentObjective()}</div>
+      <div class="inv-row">🔍 <b>Clue:</b> ${this.currentClue()}</div>
+      <div class="j-chips">${chips}</div>
+      ${facts}`;
+  }
+
+  toggleJournal() {
+    if (!this.inGame) return;
+    const p = document.getElementById('journal-modal');
+    p.classList.toggle('hidden');
+    if (!p.classList.contains('hidden')) { AudioSys.click(); this.renderJournal(); }
   }
 
   loadFinalChamber() {
@@ -158,7 +312,7 @@ export class Game {
     this.player = createPlayer(THREE, this.scene, this.world.spawn);
     this.player.onStep = () => AudioSys.step();
     this.player.onJump = () => AudioSys.jump();
-    AudioSys.music(6);
+    AudioSys.music(5);
     this.updateHUD();
     setTimeout(() => {
       this.kalamSay('The Final History Chamber! Walk to the golden console and prove you are a Guardian of Time.');
@@ -206,6 +360,15 @@ export class Game {
         k.rotation.y = this.player.heading;
       }
       this.checkInteract();
+      // waypoint marker tracks the live objective + distance readout
+      if (this.waypoint && !this.finalMode) {
+        const tg = this.questTarget();
+        if (tg) {
+          this.waypoint.visible = true;
+          this.waypoint.position.set(tg.pos.x, tg.y + Math.sin(t * 3) * 0.15, tg.pos.z);
+          this.wpDist = Math.hypot(p.x - tg.pos.x, p.z - tg.pos.z);
+        } else { this.waypoint.visible = false; this.wpDist = null; }
+      } else if (this.waypoint) this.waypoint.visible = false;
       // anti-stuck watchdog: pushing against an obstacle with no progress
       // for ~1.2s ejects the player to open ground (never a soft-lock).
       const trying = inp.f || inp.b || inp.l || inp.r;
@@ -244,18 +407,22 @@ export class Game {
     }
     for (const n of this.world.npcs) {
       const d = p.distanceTo(n.mesh.position);
-      if (d < 3.2) cands.push({ kind: 'npc', ref: n, d, label: `💬 TALK — ${n.def.name}` });
+      const isGiver = this.quest && n.def.name === this.quest.giver;
+      if (d < 3.2) cands.push({ kind: 'npc', ref: n, d, label: isGiver && this.qIndex < 0 ? `💬 TALK TO ${n.def.name.toUpperCase()} ❗` : `💬 TALK — ${n.def.name}` });
     }
     for (const c of this.world.collectibles) {
       if (c.taken) continue;
       const d = p.distanceTo(c.pos);
-      if (d < 2.8) cands.push({ kind: 'item', ref: c, d, label: `🔍 INVESTIGATE — ${lvl.collectible.name}` });
+      if (d < 2.8) {
+        if (c.i === this.qIndex) cands.push({ kind: 'item', ref: c, d, label: `🔍 INVESTIGATE — ${this.quest.artifacts[c.i]?.name || lvl.collectible.name}` });
+        else cands.push({ kind: 'locked', ref: c, d, label: `🔒 SEALED BY TIME — find Artifact ${this.qIndex + 1} first` });
+      }
     }
     if (this.world.gate) {
       const d = p.distanceTo(this.world.gate.pos);
       if (d < 4) cands.push({
         kind: 'gate', d,
-        label: this.found >= lvl.collectible.target ? (this.quizPassed ? '🔱 GATE OPEN — puzzle solved?' : '🔱 ENTER HISTORY GATE (Quiz)') : `🔱 HISTORY GATE (${this.found}/${lvl.collectible.target})`
+        label: this.qIndex >= lvl.collectible.target ? (this.quizPassed ? '🔱 GATE OPEN — puzzle solved?' : '🔱 ENTER HISTORY GATE (Quiz)') : `🔱 HISTORY GATE — ${lvl.collectible.target - this.found} artifacts still hidden`
       });
     }
     if (this.sealReady && !this.levelDone) {
@@ -286,6 +453,13 @@ export class Game {
     AudioSys.click();
     if (n.kind === 'npc') this.openDialogue(n.ref.def);
     else if (n.kind === 'item') this.takeCollectible(n.ref, false);
+    else if (n.kind === 'locked') {
+      AudioSys.fail();
+      const lvl = levelById(this.levelId);
+      toast(this.qIndex < 0
+        ? `🔒 The past is silent. First, talk to ${this.quest.giver} — follow the ▼!`
+        : `🔒 Not yet! Your clue points to Artifact ${this.qIndex + 1} (${lvl.quest.artifacts[this.qIndex].name}).`);
+    }
     else if (n.kind === 'gate') this.openGate();
     else if (n.kind === 'seal') this.takeSeal();
     else if (n.kind === 'portal') this.enterPortal();
@@ -294,6 +468,21 @@ export class Game {
   }
 
   takeCollectible(c, silent) {
+    if (c.taken) return false;
+    if (c.i !== this.qIndex) { // sequence enforcement — cannot skip ahead
+      if (!silent) {
+        AudioSys.fail();
+        toast(this.qIndex < 0
+          ? `🔒 The past is silent. First, talk to ${this.quest.giver}.`
+          : `🔒 Not yet! Your clue points to Artifact ${this.qIndex + 1}.`);
+      }
+      return false;
+    }
+    this.collectNow(c, silent);
+    return true;
+  }
+
+  collectNow(c, silent) {
     if (c.taken) return;
     c.taken = true;
     c.mesh.visible = false;
@@ -305,20 +494,18 @@ export class Game {
     if (!silent) {
       const r = this.renderer.domElement.getBoundingClientRect();
       burst(r.width / 2, r.height / 2 - 40);
-      toast(`${lvl.collectible.icon} ARTIFACT FOUND! +${lvl.collectible.points}  (${this.found}/${lvl.collectible.target} ${lvl.collectible.name}s)`);
-      this.kalamSay(`${c.name}: ${(ARTIFACT_INFO[this.levelId][c.i] || {}).fact || 'A piece of history!'}`);
+      this.showArtifactFound(c);
     }
     this.checkNewAchievements();
+    this.setQuestVisuals();
+    this.renderJournal();
     this.updateHUD();
-    if (this.found >= lvl.collectible.target && !this.quizPassed) {
-      setTimeout(() => { toast('🔱 HISTORY GATE UNLOCKED! Walk to the glowing gate.', 3400); AudioSys.portal(); }, 700);
-    }
   }
 
   openGate() {
     const lvl = levelById(this.levelId);
-    if (this.found < lvl.collectible.target) {
-      toast(`🔒 Find ${lvl.collectible.target - this.found} more ${lvl.collectible.name}s first! Follow the golden glows.`);
+    if (this.qIndex < lvl.collectible.target) {
+      toast(`🔒 The gate is silent — ${lvl.collectible.target - this.found} artifact(s) still hide in the city. ${this.qIndex < 0 ? `Talk to ${this.quest.giver} first!` : 'Follow your clue! (J for journal)'}`);
       AudioSys.fail();
       return;
     }
@@ -384,7 +571,7 @@ export class Game {
     setTimeout(() => {
       document.getElementById('fade').classList.add('hidden');
       const next = this.levelId + 1;
-      if (next <= 5) this.startLevel(next);
+      if (next <= 4) this.startLevel(next);
       else { this.renderLevelCards(); this.updateMenuSeals(); this.toChronoMap(); toast('🗺️ All seals found! Enter the FINAL HISTORY CHAMBER!', 3600); }
     }, 1100);
   }
@@ -419,23 +606,99 @@ export class Game {
     card._h = setTimeout(() => card.classList.add('hidden'), 4200);
   }
 
-  // ================= DIALOGUE / KALAM =================
+  // ================= DIALOGUE (steps + player choices) =================
+  // step = { text } | { text, choice: [{ t, then: [steps] }] }
+  buildDialogue(def) {
+    const lvl = levelById(this.levelId);
+    const isGiver = this.quest && def.name === this.quest.giver;
+    if (!isGiver) {
+      const steps = def.lines.map(text => ({ text }));
+      steps.push({ text: `💡 ${def.name.split(' ')[0]}’s hint — ${this.currentObjective()}: “${this.truncClue()}”` });
+      return { steps, cb: null };
+    }
+    const n = this.quest.artifacts.length;
+    if (this.qIndex < 0) {
+      return {
+        steps: [
+          { text: def.lines[0] },
+          { text: def.lines[1] },
+          { text: 'How will you begin your search?', choice: [
+            { t: '“What should I look for?”', then: [{ text: '🔍 ' + this.quest.artifacts[0].clue }] },
+            { t: '“Tell me about this place.”', then: [
+              { text: `You stand in ${lvl.name} — ${lvl.tagline}` },
+              { text: '🔍 ' + this.quest.artifacts[0].clue } ] }
+          ] }
+        ],
+        cb: () => { // briefing accepted → quest begins
+          this.qIndex = 0;
+          this.setQuestVisuals(); this.renderJournal(); this.updateHUD();
+          toast(`🔍 NEW CLUE — Artifact 1: ${this.quest.artifacts[0].clue}`, 5200);
+          this.kalamSay(`Quest begun! ${this.quest.artifacts[0].clue}`);
+        }
+      };
+    }
+    if (this.qIndex < n) {
+      return {
+        steps: [
+          { text: 'Still searching? Good — patience is a historian’s finest tool.' },
+          { text: '🔍 ' + this.quest.artifacts[this.qIndex].clue },
+          { text: 'The golden ▼ in the sky marks where your feet should wander. Press J any time to re-read your journal.' }
+        ],
+        cb: null
+      };
+    }
+    if (!this.quizPassed) {
+      return { steps: [{ text: this.quest.done }, { text: 'The gate glows blue ahead. Show it what you have learned!' }], cb: null };
+    }
+    return { steps: [{ text: 'The past is proud of you, Guardian. Finish what you started!' }], cb: null };
+  }
+
+  truncClue() {
+    const c = this.currentClue();
+    return c.length > 110 ? c.slice(0, 110) + '…' : c;
+  }
+
   openDialogue(def) {
     this.busy = true;
     AudioSys.talk();
+    const { steps, cb } = this.buildDialogue(def);
+    this.dlgCb = cb;
     let i = 0;
     const box = document.getElementById('dialogue');
+    const textEl = document.getElementById('dlg-text');
+    const nextBtn = document.getElementById('dlg-next');
+    const chEl = document.getElementById('dlg-choices');
     box.classList.remove('hidden');
     document.getElementById('dlg-name').textContent = `${def.icon} ${def.name}`;
-    const next = () => {
-      AudioSys.click();
-      if (i >= def.lines.length) { box.classList.add('hidden'); this.busy = false; return; }
-      document.getElementById('dlg-text').textContent = def.lines[i];
-      document.getElementById('dlg-next').textContent = i === def.lines.length - 1 ? 'Farewell →' : 'Continue →';
-      i++;
+    const show = () => {
+      chEl.innerHTML = '';
+      if (i >= steps.length) {
+        box.classList.add('hidden'); this.busy = false;
+        if (this.dlgCb) { const cb2 = this.dlgCb; this.dlgCb = null; cb2(); }
+        return;
+      }
+      const st = steps[i];
+      textEl.textContent = st.text;
+      if (st.choice) {
+        nextBtn.classList.add('hidden');
+        st.choice.forEach(opt => {
+          const b = document.createElement('button');
+          b.className = 'btn choice'; b.textContent = opt.t;
+          b.addEventListener('click', () => {
+            AudioSys.click();
+            nextBtn.classList.remove('hidden');
+            steps.splice(i + 1, 0, ...opt.then);
+            i++; show();
+          });
+          chEl.appendChild(b);
+        });
+      } else {
+        nextBtn.classList.remove('hidden');
+        nextBtn.textContent = i === steps.length - 1 ? (this.dlgCb ? 'Begin the search →' : 'Farewell →') : 'Continue →';
+      }
     };
-    document.getElementById('dlg-next').onclick = next;
-    next();
+    nextBtn.onclick = () => { AudioSys.click(); i++; show(); };
+    show();
   }
 
   kalamSay(text) {
@@ -468,17 +731,20 @@ export class Game {
   updateHUD() {
     if (this.finalMode) {
       document.getElementById('hud-mission').textContent = '🏆 FINAL HISTORY CHAMBER — Attempt the console quiz';
-      document.getElementById('hud-progress').textContent = `🔱 Seals ${Save.data.seals.length}/5`;
+      document.getElementById('hud-progress').textContent = `🔱 Seals ${Save.data.seals.length}/4`;
     } else {
       const lvl = levelById(this.levelId);
-      document.getElementById('hud-mission').textContent = `L${this.levelId} · ${lvl.mission}`;
-      const extra = this.quizPassed ? (this.sealReady ? ' · ✨ Seal ready!' : ' · 🧩 Solve the puzzle!') : '';
-      document.getElementById('hud-progress').textContent = `${lvl.collectible.icon} ${this.found}/${lvl.collectible.target}${extra}`;
+      document.getElementById('hud-mission').textContent = `🎯 ${this.currentObjective()}`;
+      let extra = '';
+      if (this.quizPassed && !this.sealReady) extra = ' · 🧩 Solve the puzzle!';
+      else if (this.sealReady && !this.levelDone) extra = ' · ✨ Seal ready!';
+      const dist = this.wpDist != null ? ` · ▼ ${Math.round(this.wpDist)}m` : '';
+      document.getElementById('hud-progress').textContent = `${lvl.collectible.icon} ${this.found}/${lvl.collectible.target}${dist}${extra}`;
     }
     document.getElementById('hud-points').textContent = `⭐ ${Save.data.historyPoints}`;
     const art = Object.values(Save.data.artifacts).reduce((a, b) => a + b, 0);
     document.getElementById('hud-art').textContent = `🏺 ${art}`;
-    document.getElementById('hud-seals').textContent = `🔱 ${Save.data.seals.length}/5`;
+    document.getElementById('hud-seals').textContent = `🔱 ${Save.data.seals.length}/4`;
   }
 
   checkNewAchievements() {
@@ -501,7 +767,7 @@ export class Game {
     document.getElementById('results-detail').textContent =
       `${lvl.collectible.icon} ${this.found}/${lvl.collectible.target} · Quiz best ${Save.data.quizScores[this.levelId] || 0}/5 · +50 seal bonus`;
     document.getElementById('results-next').textContent =
-      this.levelId < 5 ? `🌀 Enter Portal to ${lvl.portalTo} →` : '🗺️ Return to Chrono Map →';
+      this.levelId < 4 ? `🌀 Enter Portal to ${lvl.portalTo} →` : '🗺️ Return to Chrono Map →';
     document.getElementById('results-modal').classList.remove('hidden');
     AudioSys.success();
   }
@@ -509,8 +775,10 @@ export class Game {
   showVictory(score) {
     this.busy = true;
     const art = Object.values(Save.data.artifacts).reduce((a, b) => a + b, 0);
+    document.querySelector('#victory-modal .oath').textContent =
+      '“Congratulations! You have recovered all four Time Seals and become a Guardian of Time!”';
     document.getElementById('victory-stats').innerHTML =
-      `TIME SEALS: <b>5/5</b> · ARTIFACTS: <b>${art}</b><br>HISTORY POINTS: <b>${Save.data.historyPoints}</b> · FINAL SCORE: <b>${score}/5</b>`;
+      `TIME SEALS: <b>4/4</b> · ARTIFACTS: <b>${art}</b><br>HISTORY POINTS: <b>${Save.data.historyPoints}</b> · FINAL SCORE: <b>${score}/5</b>`;
     document.getElementById('victory-modal').classList.remove('hidden');
     AudioSys.success();
     setTimeout(() => AudioSys.portal(), 800);
@@ -535,14 +803,14 @@ export class Game {
       wrap.appendChild(card);
     });
     const fin = document.createElement('button');
-    const funlock = Save.data.unlocked >= 6 && Save.data.seals.length >= 5;
+    const funlock = Save.data.unlocked >= 5 && Save.data.seals.length >= 4;
     fin.className = 'level-card final' + (funlock ? ' open' : ' locked');
     fin.innerHTML = `<div class="lc-icon">${funlock ? '🏆' : '🔒'}</div><div class="lc-name">Final History Chamber</div>
-      <div class="lc-era">All five eras united</div>
-      <div class="lc-status">${funlock ? (Save.data.finalDone ? '✅ Guardian of Time!' : '✨ UNLOCKED') : '🔒 Collect 5 seals'}</div>`;
+      <div class="lc-era">All four eras united</div>
+      <div class="lc-status">${funlock ? (Save.data.finalDone ? '✅ Guardian of Time!' : '✨ UNLOCKED') : '🔒 Collect 4 seals'}</div>`;
     fin.addEventListener('click', () => {
-      if (funlock) { AudioSys.click(); this.startLevel(6); }
-      else { AudioSys.fail(); toast('🔒 Recover all five Time Seals first!'); }
+      if (funlock) { AudioSys.click(); this.startLevel(5); }
+      else { AudioSys.fail(); toast('🔒 Recover all four Time Seals first!'); }
     });
     wrap.appendChild(fin);
   }
@@ -582,7 +850,7 @@ export class Game {
 
   updateMenuSeals() {
     document.getElementById('menu-seals').textContent =
-      `🔱 Time Seals: ${Save.data.seals.length}/5 · ⭐ ${Save.data.historyPoints} · 🏺 ${Save.data.museum.length}`;
+      `🔱 Time Seals: ${Save.data.seals.length}/4 · ⭐ ${Save.data.historyPoints} · 🏺 ${Save.data.museum.length}`;
   }
 
   toChronoMap() { this.inGame = false; this.renderLevelCards(); this.updateMenuSeals(); this.menuOrbit(); showScreen('screen-levels'); }
@@ -610,6 +878,7 @@ export class Game {
       if (e.code === 'Space') { this.input.jump = true; e.preventDefault(); }
       if (e.code === 'KeyE') this.doInteract();
       if (e.code === 'KeyI') this.toggleInventory();
+      if (e.code === 'KeyJ') this.toggleJournal();
       if (e.code === 'Escape') this.togglePause();
       key(e.code, true);
     });
@@ -657,10 +926,10 @@ export class Game {
       const lvl = levelById(this.levelId);
       document.getElementById('inv-body').innerHTML = `
         <div class="inv-row">⭐ History Points: <b>${Save.data.historyPoints}</b></div>
-        <div class="inv-row">🔱 Time Seals: <b>${Save.data.seals.length}/5</b> ${Save.data.seals.map(s => levelById(s)?.sealName || '').join(' ')}</div>
+        <div class="inv-row">🔱 Time Seals: <b>${Save.data.seals.length}/4</b> ${Save.data.seals.map(s => levelById(s)?.sealName || '').join(' ')}</div>
         <div class="inv-row">${lvl && !this.finalMode ? lvl.collectible.icon + ' ' + lvl.collectible.name + 's: <b>' + this.found + '/' + lvl.collectible.target + '</b>' : '🏆 Final Chamber'}</div>
         <div class="inv-row">🏺 Museum artifacts: <b>${Save.data.museum.length}</b></div>
-        <div class="inv-row">🗺️ Levels complete: <b>${Save.data.completed.length}/5</b></div>`;
+        <div class="inv-row">🗺️ Levels complete: <b>${Save.data.completed.length}/4</b></div>`;
     }
   }
 
@@ -689,7 +958,7 @@ export class Game {
     }));
     document.getElementById('btn-resume').addEventListener('click', () => {
       AudioSys.click();
-      const id = Math.min(Save.data.unlocked, 5);
+      const id = Math.min(Save.data.unlocked, 4);
       if (this.inGame) this.togglePause(false);
       else this.startLevel(Save.data.currentLevel && Save.data.currentLevel <= Save.data.unlocked ? Save.data.currentLevel : id);
     });
@@ -703,7 +972,7 @@ export class Game {
     // results
     document.getElementById('results-next').addEventListener('click', () => {
       AudioSys.click(); document.getElementById('results-modal').classList.add('hidden'); this.busy = false; this.renderLevelCards();
-      if (this.levelId < 5) this.enterPortal();
+      if (this.levelId < 4) this.enterPortal();
       else this.toChronoMap();
     });
     document.getElementById('results-map').addEventListener('click', () => {
@@ -714,6 +983,10 @@ export class Game {
     });
     // hud buttons
     document.getElementById('btn-inv-hud').addEventListener('click', () => this.toggleInventory());
+    document.getElementById('btn-journal-hud').addEventListener('click', () => this.toggleJournal());
+    document.getElementById('journal-close').addEventListener('click', () => this.toggleJournal());
+    document.getElementById('mission-go').addEventListener('click', () => this.dismissMission());
+    document.getElementById('art-continue').addEventListener('click', () => this.dismissArtifact());
     document.getElementById('btn-kalam-hud').addEventListener('click', () => this.toggleKalam());
     document.getElementById('inv-close').addEventListener('click', () => this.toggleInventory());
     document.getElementById('kalam-close').addEventListener('click', () => this.toggleKalam());
@@ -730,7 +1003,7 @@ export class Game {
       document.getElementById('puzzle-modal').classList.add('hidden'); this.busy = false;
     });
     // settings
-    document.getElementById('set-music').addEventListener('change', e => { Save.data.settings.music = e.target.checked; Save.write(); this.applySettings(); if (this.inGame) AudioSys.music(this.finalMode ? 6 : this.levelId); });
+    document.getElementById('set-music').addEventListener('change', e => { Save.data.settings.music = e.target.checked; Save.write(); this.applySettings(); if (this.inGame) AudioSys.music(this.finalMode ? 5 : this.levelId); });
     document.getElementById('set-sfx').addEventListener('change', e => { Save.data.settings.sfx = e.target.checked; Save.write(); this.applySettings(); });
     document.getElementById('set-quality').addEventListener('change', e => { Save.data.settings.quality = e.target.value; Save.write(); this.applySettings(); });
     document.getElementById('btn-reset').addEventListener('click', () => {

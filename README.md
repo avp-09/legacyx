@@ -27,21 +27,25 @@ Then open **http://localhost:8080**. Use Chrome/Edge with internet (Three.js CDN
 | E | Interact / Talk / Collect |
 | I | Inventory |
 | Esc | Pause |
+| J | Quest journal |
 | Touch | Left joystick + E / ⤒ / 🤖 / 🎒 buttons |
 
-## 🔁 Core loop (every level)
+## 🔁 Core loop (every level — sequential treasure hunt)
 
-Explore → find clues → talk to NPCs → collect artifacts → History Gate quiz (4/5 to pass, kind retry) →
-final puzzle → Time Seal → portal → next era unlocked.
+Mission briefing → talk to the guide NPC → receive Clue 1 → explore → collect
+Artifact 1 (others stay sealed) → Clue 2 → … → History Gate quiz (4/5 to pass,
+kind retry) → final puzzle → Time Seal → portal → next era unlocked.
 
-## 🗺️ Levels
+A golden ▼ waypoint, live objective + distance readout, and the 📜 journal
+(current clue, progress, collected facts) always show the next step.
+
+## 🗺️ Levels (4 eras + final)
 
 1. **The Lost City** (Indus Valley) — 5 tablets, drainage-pipe puzzle
 2. **The Scholar's Challenge** (Nalanda) — 5 scrolls, library shelving puzzle
 3. **Rise of the Cholas** — 5 blueprint pieces, vimana stacking puzzle
 4. **The Fort of Secrets** — 4 inscription shards, four trials
-5. **The Road to Freedom** — 5 newspaper pieces, front-page layout puzzle
-6. **🏆 Final History Chamber** — mixed quiz from all eras
+5. **🏆 Final History Chamber** — mixed quiz from all four eras
 
 Plus: main menu, Chrono Map level select, History Museum, achievements,
 inventory, pause menu, results/victory screens, localStorage saves,

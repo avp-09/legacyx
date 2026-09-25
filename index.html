@@ -33,13 +33,14 @@
       <div class="hud-right">
         <span class="hud-pill" id="hud-points">⭐ 0</span>
         <span class="hud-pill" id="hud-art">🏺 0</span>
-        <span class="hud-pill" id="hud-seals">🔱 0/5</span>
+        <span class="hud-pill" id="hud-seals">🔱 0/4</span>
         <button class="icon-btn" id="btn-inv-hud" title="Inventory (I)">🎒</button>
+        <button class="icon-btn" id="btn-journal-hud" title="Quest Journal (J)">📜</button>
         <button class="icon-btn" id="btn-kalam-hud" title="Ask Kalam">🤖</button>
         <button class="icon-btn" id="btn-pause" title="Pause (Esc)">⏸️</button>
       </div>
     </div>
-    <div id="hud-controls-hint">WASD move · Mouse-drag camera · <b>E</b> interact · <b>Space</b> jump · <b>I</b> bag · <b>Esc</b> pause</div>
+    <div id="hud-controls-hint">WASD move · Mouse-drag camera · <b>E</b> interact · <b>Space</b> jump · <b>I</b> bag · <b>J</b> journal · <b>Esc</b> pause</div>
     <div id="interact-prompt" class="hidden"></div>
   </div>
 
@@ -58,7 +59,40 @@
   <div id="dialogue" class="hidden">
     <div id="dlg-name">NPC</div>
     <div id="dlg-text"></div>
+    <div id="dlg-choices"></div>
     <button class="btn primary" id="dlg-next">Continue →</button>
+  </div>
+
+  <!-- Mission intro -->
+  <div id="mission-modal" class="modal hidden">
+    <div class="panel center">
+      <div id="mission-kicker" class="kicker">NEW MISSION</div>
+      <h2 id="mission-title">The Lost City</h2>
+      <div id="mission-era" class="tagline"></div>
+      <p id="mission-text" class="p-sub"></p>
+      <p id="mission-objective" class="p-hint"></p>
+      <button class="btn primary big" id="mission-go">Begin the Quest →</button>
+    </div>
+  </div>
+
+  <!-- Artifact found -->
+  <div id="artifact-modal" class="modal hidden">
+    <div class="panel small center results">
+      <div id="art-icon" class="big-seal">🏺</div>
+      <h2 id="art-title">ARTIFACT FOUND!</h2>
+      <div id="art-name" class="art-name"></div>
+      <p id="art-fact" class="quiz-msg"></p>
+      <div id="art-points" class="art-points">+10 HISTORY POINTS</div>
+      <button class="btn primary big" id="art-continue">Continue →</button>
+    </div>
+  </div>
+
+  <!-- Quest journal -->
+  <div id="journal-modal" class="modal hidden">
+    <div class="panel">
+      <div class="panel-head"><span>📜 Quest Journal</span><button class="icon-btn" id="journal-close">✕</button></div>
+      <div id="journal-body"></div>
+    </div>
   </div>
 
   <!-- Quiz -->

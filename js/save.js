@@ -3,7 +3,7 @@ const KEY = 'bharatQuestSaveV1';
 
 const DEFAULTS = () => ({
   currentLevel: 1,
-  unlocked: 1,              // highest unlocked level (1..6; 6 = final chamber)
+  unlocked: 1,              // highest unlocked level (1..5; 5 = final chamber)
   completed: [],            // [1,2..]
   seals: [],                // [1,2..]
   historyPoints: 0,
@@ -16,12 +16,25 @@ const DEFAULTS = () => ({
   finalDone: false
 });
 
+// One-time migration for saves from the 5-level era: drop all Level 5 data.
+function migrate(d) {
+  const keep = (arr) => (arr || []).filter(x => !(String(x).startsWith('5-') || x === 5));
+  d.completed = keep(d.completed);
+  d.seals = keep(d.seals);
+  d.museum = keep(d.museum);
+  for (const k of ['artifacts', 'quizScores', 'stars']) {
+    if (d[k] && d[k][5] !== undefined) delete d[k][5];
+  }
+  d.unlocked = Math.max(1, Math.min(5, d.unlocked || 1));
+  return d;
+}
+
 export const Save = {
   data: DEFAULTS(),
   load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) this.data = { ...DEFAULTS(), ...JSON.parse(raw) };
+      if (raw) this.data = migrate({ ...DEFAULTS(), ...JSON.parse(raw) });
     } catch { this.data = DEFAULTS(); }
     return this.data;
   },
@@ -49,8 +62,8 @@ export const Save = {
     const got = this.data.artifacts[levelId] || 0;
     this.data.stars[levelId] = got >= target ? 3 : got >= Math.ceil(target * 0.6) ? 2 : 1;
     if (got >= target && !this.data.achievements.includes('explorer')) this.data.achievements.push('explorer');
-    this.data.unlocked = Math.max(this.data.unlocked, Math.min(6, levelId + 1));
-    if (this.data.seals.length >= 5 && !this.data.achievements.includes('guardian')) this.data.achievements.push('guardian');
+    this.data.unlocked = Math.max(this.data.unlocked, Math.min(5, levelId + 1));
+    if (this.data.seals.length >= 4 && !this.data.achievements.includes('guardian')) this.data.achievements.push('guardian');
     this.write();
   },
   completeFinal() {

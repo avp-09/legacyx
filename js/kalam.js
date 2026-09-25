@@ -57,7 +57,7 @@ export async function getHistoricalAnswer(question, context = {}) {
     2: 'Nalanda was a great university. Ask me about scholars, the library or the stars!',
     3: 'The Cholas raised mighty temples. Ask me about temples or Rajaraja!',
     4: 'This fort guards many secrets. Ask me about Shah Jahan or the Taj Mahal!',
-    5: 'The printing press spread the dream of freedom. Ask me about Gandhi or 1947!'
+    5: 'The Final Chamber tests all four eras! Ask me about drains, Nalanda, temples or forts!'
   };
   return `🤖 Wonderful question! ${eraHints[context.levelId] || 'Indian history is full of wonders — try asking about drains, Nalanda, temples, forts or freedom!'}`;
 }

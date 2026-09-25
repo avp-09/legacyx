@@ -9,21 +9,42 @@ export const LEVELS = [
     id: 1, key: 'indus', name: 'The Lost City', era: 'Indus Valley Civilization · c. 2600–1900 BCE',
     icon: '🟤', color: 0xd9a066, sky: 0xffd9a0, fog: 0xf2c179, ground: 0xcfa15e,
     tagline: 'Restore the planned city of the Harappans.',
-    mission: 'RESTORE THE CITY — Find 5 civilization tablets',
+    mission: 'RESTORE THE CITY — Speak with the City Elder, then recover 5 tablets',
     collectible: { name: 'Civilization Tablet', icon: '🧱', target: 5, points: 10 },
     npcs: [
-      { name: 'City Elder', icon: '🧙', pos: [6, 0, 4], color: 0x8a5a2b,
+      { name: 'City Elder', icon: '🧙', pos: [6, 0, 4], color: 0x8a5a2b, role: 'giver',
         lines: [
-          'Welcome, traveller! Our city is carefully planned. Look beneath the streets…',
-          '…and you may discover how our people managed water. The drains run beside every lane!',
-          'Tablets glow near the marketplace, the Great Bath, the drains, homes and granary.'
+          'Ah, a Guardian of Time! Our city is carefully planned — commendable, no?',
+          'Five tablets are lost. Help an old man recover his city’s memory.'
         ] },
-      { name: 'Potter Amma', icon: '🏺', pos: [-10, 0, 8], color: 0xb5542d,
+      { name: 'Potter Amma', icon: '🏺', pos: [-10, 0, 8], color: 0xb5542d, role: 'sage',
         lines: [
-          'My pots carry grain and water to every house.',
-          'A tablet rests where pots are stacked high — near my stall, child!'
+          'Mind my pots, child! Each one carries grain or water to some hungry house.',
+          'The Elder’s quest, eh? Walk the city slowly — old walls whisper to patient feet.'
         ] }
     ],
+    quest: {
+      giver: 'City Elder',
+      brief: 'Five clay tablets — the memory of our planned city — lie scattered from market to granary. The City Elder waits near the plaza to guide your search.',
+      artifacts: [
+        { name: 'Harappan Seal',
+          clue: 'Begin where merchants once gathered. Among striped awnings and clay pots, the old marketplace hides the first tablet.',
+          praise: 'The Seal of Traders! Well done. Now follow the water — the builders’ drains run like veins beside every lane.' },
+        { name: 'Drain Cover Stone',
+          clue: 'Follow the ancient water routes. Search beside the glowing drainage channels, where the builders’ careful work still shows.',
+          praise: 'You read the city as its builders intended! Next, go where water was part of daily life — the Great Bath.' },
+        { name: 'Painted Pottery',
+          clue: 'Steam and splashing once filled the air. Climb the steps of the Great Bath and look around its rim.',
+          praise: 'Beautifully found! Now head north, past the houses, to the quiet courtyard of banners.' },
+        { name: 'Bead Necklace',
+          clue: 'North of the plaza lies a quiet courtyard hung with banners. Someone dropped something precious there.',
+          praise: 'A treasure returned! One tablet remains — by the great storehouse in the far west, where grain fed the city.' },
+        { name: 'Granary Token',
+          clue: 'Grain fed the city, and records fed its memory. Search around the pillared granary in the west.',
+          praise: 'All five tablets recovered! The History Gate will open for you now.' }
+      ],
+      done: 'The tablets sing together! Take them to the glowing History Gate, Guardian.'
+    },
     gateQuizTitle: '🔱 HISTORY GATE — Indus Valley',
     puzzleTitle: 'Drainage Puzzle — guide water to the Great Bath',
     sealName: '🏺 Indus Valley Seal',
@@ -33,21 +54,42 @@ export const LEVELS = [
     id: 2, key: 'nalanda', name: "The Scholar's Challenge", era: 'Ancient India · Nalanda · c. 5th–12th century CE',
     icon: '🟡', color: 0xe8c547, sky: 0xbfe3ff, fog: 0xcfe8d8, ground: 0x8fbf7f,
     tagline: 'Recover the lost scrolls of the great university.',
-    mission: 'THE LOST SCROLLS — Find 5 missing scrolls',
+    mission: "THE LOST SCROLLS — Speak with the Acharya, then recover 5 scrolls",
     collectible: { name: 'Palm-leaf Scroll', icon: '📜', target: 5, points: 10 },
     npcs: [
-      { name: 'Acharya', icon: '👳', pos: [5, 0, 2], color: 0xcf7a1e,
+      { name: 'Acharya', icon: '👳', pos: [5, 0, 2], color: 0xcf7a1e, role: 'giver',
         lines: [
-          'Nalanda welcomes seekers from across Asia, young scholar.',
-          'One scroll lies where students studied the stars — the observatory platform.',
-          'Another sleeps among the garden stupas. Walk softly and look for golden glows.'
+          'Welcome, young seeker. Students cross mountains and seas to learn here.',
+          'Five of our scrolls have wandered off. Shall we bring them home together?'
         ] },
-      { name: 'Student Mira', icon: '🎒', pos: [-8, 0, -6], color: 0x2e7d8a,
+      { name: 'Student Mira', icon: '🎒', pos: [-8, 0, -6], color: 0x2e7d8a, role: 'sage',
         lines: [
-          'I copied sutras in the library till my fingers ached!',
-          'Check the library racks, the debate courtyard and the dormitory veranda.'
+          'I copy sutras till my fingers ache — but I love it here!',
+          'The Acharya’s search, yes? I’ve walked every courtyard. Happy to share what I know.'
         ] }
     ],
+    quest: {
+      giver: 'Acharya',
+      brief: 'Five palm-leaf scrolls are missing across the university — from debating halls to the stargazing platform. The Acharya waits in the courtyard to begin the search.',
+      artifacts: [
+        { name: 'Debate Bell',
+          clue: 'Begin where scholars gather to exchange ideas. The debating courtyard rings with arguments — and something small and bronze waits there.',
+          praise: 'The Debate Bell! One scroll home. Next, look to the heavens — where students study the stars.' },
+        { name: 'Astronomy Chart',
+          clue: 'Find the raised platform where students observe the night sky. A chart of the heavens lies nearby.',
+          praise: 'Excellent discovery! Now wander to the quiet garden, where stupas keep cool shade.' },
+        { name: 'Medicine Mortar',
+          clue: 'Healing herbs grow in the stupa garden. Search among the white domes for a healer’s tool.',
+          praise: 'The library’s story is still incomplete. The great library itself hides the next scroll.' },
+        { name: 'Palm-leaf Sutra',
+          clue: 'Climb to the great library with its tall wooden door. Wisdom sleeps between its book piles.',
+          praise: 'Wonderful! One scroll remains — near the scholar quarters in the east, where travellers rest.' },
+        { name: 'Traveller’s Brush',
+          clue: 'Far-travelled students bunk in the eastern quarters. A traveller’s brush waits where they sleep.',
+          praise: 'All five scrolls recovered! The History Gate will open for you now.' }
+      ],
+      done: 'Knowledge restored! Take the scrolls’ blessing to the glowing History Gate.'
+    },
     gateQuizTitle: '🔱 HISTORY GATE — Nalanda',
     puzzleTitle: 'Library Puzzle — shelve the scrolls in order',
     sealName: '📜 Nalanda Seal',
@@ -57,21 +99,42 @@ export const LEVELS = [
     id: 3, key: 'chola', name: 'Rise of the Cholas', era: 'Chola Dynasty · c. 9th–13th century CE',
     icon: '🔵', color: 0x4aa3df, sky: 0x9fd4ff, fog: 0xbcd9f5, ground: 0x9dbb7a,
     tagline: 'Rebuild the great temple, piece by piece.',
-    mission: 'THE TEMPLE BLUEPRINT — Find 5 architectural pieces',
+    mission: 'THE TEMPLE BLUEPRINT — Speak with the Sthapati, then find 5 design pieces',
     collectible: { name: 'Temple Design Piece', icon: '🛕', target: 5, points: 10 },
     npcs: [
-      { name: 'Sthapati (Architect)', icon: '🏛️', pos: [6, 0, 6], color: 0x9c5b1e,
+      { name: 'Sthapati (Architect)', icon: '🏛️', pos: [6, 0, 6], color: 0x9c5b1e, role: 'giver',
         lines: [
-          'A temple rises like a prayer in stone: base, pillars, walls, tower, finial.',
-          'My drawings blew across the city — market, port, village, carvers’ yard, fields.',
-          'Bring all five and we shall raise the vimana together!'
+          'A temple rises like a prayer in stone — base, pillars, walls, tower, finial.',
+          'The wind stole my five drawings! Lend me your sharp eyes, Guardian?'
         ] },
-      { name: 'Sailor Karikalan', icon: '⛵', pos: [-14, 0, 10], color: 0x1e6f9c,
+      { name: 'Sailor Karikalan', icon: '⛵', pos: [-14, 0, 10], color: 0x1e6f9c, role: 'sage',
         lines: [
-          'Our ships carried spices and stories to distant shores!',
-          'A blueprint page fluttered down near my boat. The port wind is mischievous.'
+          'Ha! Our ships outrun the monsoon itself — spices out, stories in!',
+          'Lost drawings, you say? The harbour wind takes everything sooner or later.'
         ] }
     ],
+    quest: {
+      giver: 'Sthapati (Architect)',
+      brief: 'Five temple drawings blew across the city — from stone yard to harbour. The royal architect waits by the market to guide the hunt.',
+      artifacts: [
+        { name: 'Foundation Design',
+          clue: 'Strong temples begin with strong stone. Search the stoneworkers’ yard, where raw rock waits to be shaped.',
+          praise: 'The foundation! Now find where sculptors turn stone into beauty — their open workshop.' },
+        { name: 'Pillar Design',
+          clue: 'Look among the sculptors’ tools and unfinished stones in their pillared workshop.',
+          praise: 'Straight and true! Next, the busy market — a drawing flutters near the stalls.' },
+        { name: 'Wall Design',
+          clue: 'The market hums with traders and bronze. A wall design hides between the stalls.',
+          praise: 'Half the temple stands! Now brave the salty wind — search the harbour and its boats.' },
+        { name: 'Tower Design',
+          clue: 'Gulls cry over masts and ropes. The tower drawing lies somewhere along the harbour.',
+          praise: 'Nearly there! Last — the village streets, where something golden glints.' },
+        { name: 'Finial Design',
+          clue: 'Walk the village lanes east of the market. A glint of gold marks the final drawing.',
+          praise: 'All five designs recovered! We shall raise the vimana — but first, the History Gate.' }
+      ],
+      done: 'The blueprint is whole! Take it to the glowing History Gate, Guardian.'
+    },
     gateQuizTitle: '🔱 HISTORY GATE — The Cholas',
     puzzleTitle: 'Temple Puzzle — stack the vimana in order',
     sealName: '🛕 Chola Seal',
@@ -81,48 +144,42 @@ export const LEVELS = [
     id: 4, key: 'fort', name: 'The Fort of Secrets', era: 'Medieval India · Forts & Sultanates',
     icon: '🟠', color: 0xd97b2e, sky: 0xffc98a, fog: 0xe8b083, ground: 0xb08a5a,
     tagline: 'Piece together the hidden inscription.',
-    mission: 'THE HIDDEN MESSAGE — Find 4 inscription pieces',
+    mission: 'THE HIDDEN MESSAGE — Speak with Guard Veer, then find 4 inscription pieces',
     collectible: { name: 'Inscription Piece', icon: '🪨', target: 4, points: 15 },
     npcs: [
-      { name: 'Guard Veer', icon: '💂', pos: [4, 0, 8], color: 0x7a3b2e,
+      { name: 'Guard Veer', icon: '💂', pos: [4, 0, 8], color: 0x7a3b2e, role: 'giver',
         lines: [
-          'Halt… oh, a Guardian of Time! The inscription shattered into four.',
-          'One piece needs a matching eye, one needs a map, one needs symbols, one needs memory.',
-          'Start at the gate courtyard and follow the golden glows.'
+          'Halt! …Oh. A Guardian of Time. Forgive an old soldier’s habits.',
+          'Our inscription shattered into four. Help me gather every piece, and the fort will trust you.'
         ] },
-      { name: 'Court Scholar', icon: '📖', pos: [-6, 0, -8], color: 0x4a5d8a,
+      { name: 'Court Scholar', icon: '📖', pos: [-6, 0, -8], color: 0x4a5d8a, role: 'sage',
         lines: [
-          'Which monument did Shah Jahan raise for love? Keep that answer ready…',
-          'The secret chamber opens only for those who honour the past.'
+          'Ah, a seeker! I catalogue every carving in these walls.',
+          'Ask Veer for the search order — but for puzzles of memory, I am your scholar.'
         ] }
     ],
+    quest: {
+      giver: 'Guard Veer',
+      brief: 'An ancient inscription lies shattered in four pieces — from the main gate to the secret chamber. Guard Veer waits in the courtyard to brief you.',
+      artifacts: [
+        { name: 'Inscription · Duty',
+          clue: 'Begin near the main entrance. Travellers once streamed through the great gate — a piece hides nearby.',
+          praise: 'Duty recovered! Next, where people gather — search the eastern courtyard.' },
+        { name: 'Inscription · Courage',
+          clue: 'The eastern courtyard bustles with life. Courage waits among its stones.',
+          praise: 'Two pieces home! Now the western walls — study the carvings for what does not belong.' },
+        { name: 'Inscription · Wisdom',
+          clue: 'Old walls wear many symbols. Look along the western courtyard for a carving that stands apart.',
+          praise: 'Wisdom returns! The last piece sleeps near the hidden door — approach the secret chamber.' },
+        { name: 'Inscription · Memory',
+          clue: 'Somewhere north, a plain wall hides a door. The final piece waits at the secret chamber’s feet.',
+          praise: 'The message is whole! The History Gate will open for you now.' }
+      ],
+      done: 'The inscription speaks again! Carry it to the glowing History Gate.'
+    },
     gateQuizTitle: '🔱 HISTORY GATE — Medieval India',
     puzzleTitle: 'Secret Chamber — four trials of the fort',
     sealName: '🏰 Fort Seal',
-    portalTo: 'the freedom struggle'
-  },
-  {
-    id: 5, key: 'freedom', name: 'The Road to Freedom', era: 'Independence Movement · 19th–20th century',
-    icon: '🟢', color: 0x4caf6d, sky: 0xaee3ff, fog: 0xc4dfe8, ground: 0x8a8a72,
-    tagline: 'Rebuild the newspaper that woke a nation.',
-    mission: 'THE MISSING NEWSPAPER — Find 5 newspaper pieces',
-    collectible: { name: 'Newspaper Piece', icon: '📰', target: 5, points: 10 },
-    npcs: [
-      { name: 'Editor Desai', icon: '🖋️', pos: [5, 0, 3], color: 0x3b3b3b,
-        lines: [
-          'The press is silent! Our newspaper lies scattered across town.',
-          'Find the EVENT, DATE, PERSON, LOCATION and HEADLINE.',
-          'Check the station, press office, meeting ground, shops and the banyan tree.'
-        ] },
-      { name: 'Station Master', icon: '🚂', pos: [-12, 0, 6], color: 0x1e4f9c,
-        lines: [
-          'Trains carried newspapers — and hopes — to every corner of Bharat.',
-          'Something fluttered onto platform 2 this morning…'
-        ] }
-    ],
-    gateQuizTitle: '🔱 HISTORY GATE — Freedom Struggle',
-    puzzleTitle: 'Press Puzzle — lay out the front page',
-    sealName: '🕊️ Freedom Seal',
     portalTo: 'the Final Chamber'
   }
 ];
@@ -155,13 +212,6 @@ export const QUIZZES = {
     { q: 'Qutub Minar was begun under which rulers?', options: ['The Delhi Sultans', 'The Cholas', 'The Mauryas', 'The British'], answer: 0, fact: 'Qutb-ud-din Aibak began it; Iltutmish completed it.' },
     { q: 'Intricate fort carvings often include…', options: ['Lotus, peacock and geometric patterns', 'Cartoon robots', 'Neon signs', 'Barcodes'], answer: 0, fact: 'Nature and geometry inspired medieval Indian art.' },
     { q: 'A “secret chamber” in stories usually hides…', options: ['Important records or treasures', 'Socks', 'Homework', 'Sandwiches'], answer: 0, fact: 'Forts really did have hidden rooms for grain, records and safety.' }
-  ],
-  5: [
-    { q: 'The printing press helped the freedom movement by…', options: ['Spreading news and ideas quickly', 'Printing pizza menus', 'Making paper boats', 'Wrapping gifts'], answer: 0, fact: 'Newspapers carried ideas of freedom to towns and villages.' },
-    { q: 'Mahatma Gandhi’s peaceful method of protest is called…', options: ['Satyagraha', 'Sword-fighting', 'Hide and seek', 'Arm wrestling'], answer: 0, fact: 'Satyagraha means holding firmly to truth through non-violence.' },
-    { q: 'The Dandi March (1930) protested…', options: ['The salt tax', 'The price of tea', 'Train timings', 'Cricket rules'], answer: 0, fact: 'Gandhiji walked to Dandi to make salt and defy an unjust law.' },
-    { q: '“Jai Hind” and “Vande Mataram” are…', options: ['Stirring slogans and songs of freedom', 'Types of sweets', 'Names of trains', 'Board games'], answer: 0, fact: 'They united millions during the struggle for independence.' },
-    { q: 'India became independent in the year…', options: ['1947', '1800', '2001', '1599'], answer: 0, fact: 'India gained independence on 15 August 1947.' }
   ]
 };
 
@@ -176,16 +226,16 @@ export const FINAL_QUESTIONS = [
 export const ARTIFACT_INFO = {
   1: [
     { name: 'Harappan Seal', fact: 'Tiny seals stamped goods and may show one of the world’s oldest scripts.' },
-    { name: 'Painted Pottery', fact: 'Potters painted pots with peacocks, fish and geometric patterns.' },
     { name: 'Drain Cover Stone', fact: 'Cover stones kept street drains clean — ancient town planning!' },
+    { name: 'Painted Pottery', fact: 'Potters painted pots with peacocks, fish and geometric patterns.' },
     { name: 'Bead Necklace', fact: 'Harappans drilled perfect beads from carnelian and shell.' },
     { name: 'Granary Token', fact: 'Great granaries stored grain for the whole city.' }
   ],
   2: [
-    { name: 'Palm-leaf Sutra', fact: 'Texts were written on dried palm leaves with a metal stylus.' },
+    { name: 'Debate Bell', fact: 'A bell called scholars together for grand debates.' },
     { name: 'Astronomy Chart', fact: 'Nalanda scholars tracked stars and planets from observatories.' },
     { name: 'Medicine Mortar', fact: 'Ayurveda — the science of life — was studied here.' },
-    { name: 'Debate Bell', fact: 'Scholars debated philosophy in grand courtyards.' },
+    { name: 'Palm-leaf Sutra', fact: 'Texts were written on dried palm leaves with a metal stylus.' },
     { name: 'Traveller’s Brush', fact: 'Xuanzang carried hundreds of manuscripts back to China.' }
   ],
   3: [
@@ -200,13 +250,6 @@ export const ARTIFACT_INFO = {
     { name: 'Inscription · Courage', fact: 'Fort walls protected markets, temples and palaces.' },
     { name: 'Inscription · Wisdom', fact: 'Court scholars preserved poetry, science and history.' },
     { name: 'Inscription · Memory', fact: 'Monuments like the Taj Mahal keep memories in stone.' }
-  ],
-  5: [
-    { name: 'The Event', fact: 'Peaceful marches and meetings demanded freedom.' },
-    { name: 'The Date', fact: '15 August 1947 — the day India became independent.' },
-    { name: 'The Leader', fact: 'Gandhiji, Nehru, Patel, Bose, Sarojini Naidu and millions more led the way.' },
-    { name: 'The Place', fact: 'From Dandi’s shore to Delhi’s streets, every town played a part.' },
-    { name: 'The Headline', fact: '“FREEDOM AT LAST” — newspapers carried the news across Bharat.' }
   ]
 };
 
@@ -214,7 +257,7 @@ export const ACHIEVEMENTS = [
   { id: 'first', icon: '🏺', name: 'FIRST DISCOVERY', desc: 'Collect your first artifact.' },
   { id: 'scholar', icon: '🧠', name: 'HISTORY SCHOLAR', desc: 'Score 5/5 on any quiz.' },
   { id: 'explorer', icon: '🗺️', name: 'EXPLORER', desc: 'Find all collectibles in a level.' },
-  { id: 'guardian', icon: '🔱', name: 'GUARDIAN OF TIME', desc: 'Collect all five Time Seals.' },
+  { id: 'guardian', icon: '🔱', name: 'GUARDIAN OF TIME', desc: 'Collect all four Time Seals.' },
   { id: 'master', icon: '🏆', name: 'LEGACY MASTER', desc: 'Complete the entire game.' }
 ];
 
