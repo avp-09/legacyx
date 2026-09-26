@@ -41,10 +41,18 @@ A golden ▼ waypoint, live objective + distance readout, and the 📜 journal
 
 ## 🗺️ Levels (4 eras + final)
 
-1. **The Lost City** (Indus Valley) — 5 tablets, drainage-pipe puzzle
-2. **The Scholar's Challenge** (Nalanda) — 5 scrolls, library shelving puzzle
-3. **Rise of the Cholas** — 5 blueprint pieces, vimana stacking puzzle
-4. **The Fort of Secrets** — 4 inscription shards, four trials
+1. **The Lost City** (Indus Valley) — 5 tablets, drainage-pipe puzzle.
+   Districts: city gate, marketplace, homes, Great Bath, drains, granary,
+   south homes, farmlands, brick workshops, well.
+2. **The Scholar's Challenge** (Nalanda) — 5 scrolls, library shelving puzzle.
+   Campus: south gate, courtyard, learning halls, enterable Great Library,
+   observatory, stupa garden, scholar quarters, reading garden, debate ring.
+3. **Rise of the Cholas** — 5 blueprint pieces, vimana stacking puzzle.
+   Settlement: temple + gateway, sculptor workshop, markets, village,
+   royal court, harbor with pier.
+4. **The Fort of Secrets** — 4 inscription shards, four trials.
+   Complex: outer gate, artisans' ward, courtyards, colonnade, durbar hall,
+   royal court, lookout tower, gardens, secret chamber.
 5. **🏆 Final History Chamber** — mixed quiz from all four eras
 
 Plus: main menu, Chrono Map level select, History Museum, achievements,

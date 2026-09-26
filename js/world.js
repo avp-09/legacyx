@@ -10,7 +10,7 @@ export function buildWorld(THREE, scene, level) {
     scene, THREE, R,
     colliders: [],
     bounds: 24,
-    npcs: [], collectibles: [], landmarks: [],
+    npcs: [], collectibles: [], landmarks: [], ambient: [],
     dynamics: [], // fn(dt,t)
     gate: null, seal: null, portal: null
   };
@@ -175,16 +175,65 @@ export function buildWorld(THREE, scene, level) {
     const cap = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }));
     cap.position.y = 1.55; grp.add(cap);
+    if (icon) {
     // floating icon sprite via canvas
     const cv = document.createElement('canvas'); cv.width = cv.height = 128;
     const cx = cv.getContext('2d');
     cx.font = '84px serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
-    cx.fillText(icon || '💬', 64, 70);
+    cx.fillText(icon, 64, 70);
     const tex = new THREE.CanvasTexture(cv);
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
     spr.scale.set(0.9, 0.9, 1); spr.position.y = 2.3; grp.add(spr);
+    }
     scene.add(grp);
-    return { grp, spr };
+    return { grp };
+  }
+
+  // Bullock cart: bed, big spoked wheels, draft pole, hay load.
+  function cart(x, z, ry = 0) {
+    const grp = new THREE.Group(); grp.position.set(x, 0, z); grp.rotation.y = ry;
+    const wood = new THREE.MeshStandardMaterial({ color: 0x7a5228, roughness: 0.85 });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, 1.3), wood);
+    bed.position.y = 1.0; bed.castShadow = true; grp.add(bed);
+    [-0.85, 0.85].forEach(px => [-0.75, 0.75].forEach(pz => {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.12), wood);
+      rail.position.set(px, 1.35, pz); grp.add(rail);
+    }));
+    [-0.75, 0.75].forEach(pz => {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.14, 12), wood);
+      wheel.rotation.x = Math.PI / 2; wheel.position.set(0, 0.6, pz); wheel.castShadow = true; grp.add(wheel);
+      const hub = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8),
+        new THREE.MeshStandardMaterial({ color: 0x4a3220 }));
+      hub.position.set(0, 0.6, pz + (pz > 0 ? 0.1 : -0.1)); grp.add(hub);
+    });
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 2.4), wood);
+    pole.position.set(0, 0.85, 1.9); pole.rotation.x = 0.12; grp.add(pole);
+    const hay = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 1.0),
+      new THREE.MeshStandardMaterial({ color: 0xd9b64a, roughness: 1, flatShading: true }));
+    hay.position.y = 1.5; hay.castShadow = true; grp.add(hay);
+    scene.add(grp);
+    H.colliders.push({ x, z, r: 1.6 });
+  }
+
+  // Ambient walker: non-interactive life (merchants, students, guards…).
+  // Stored in H.ambient so the interaction system never prompts for them.
+  function ambient(color, waypoints, speed = 1.7) {
+    const { grp } = npcMesh(color, null);
+    grp.position.set(waypoints[0][0], 0, waypoints[0][1]);
+    scene.add(grp);
+    // NOTE: no collider — ambient figures are soft so no phantom walls trail them.
+    const w = { mesh: grp, wps: waypoints, i: 1, speed };
+    H.ambient.push(w);
+    H.dynamics.push((dt, t) => {
+      const tx = w.wps[w.i][0], tz = w.wps[w.i][1];
+      const dx = tx - grp.position.x, dz = tz - grp.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.4) { w.i = (w.i + 1) % w.wps.length; return; }
+      grp.position.x += dx / d * w.speed * dt;
+      grp.position.z += dz / d * w.speed * dt;
+      grp.rotation.y = Math.atan2(dx, dz);
+      grp.position.y = Math.abs(Math.sin(t * 8)) * 0.06;
+    });
   }
 
   // ---------- collectible mesh ----------
@@ -308,7 +357,7 @@ export function buildWorld(THREE, scene, level) {
   };
 
   if (level.id === 1) {
-    P.bounds = 32;
+    P.bounds = 40;
     // Mohenjo-daro: brick houses grid, Great Bath, granary, drains
     const brick = 0xb5763f, brick2 = 0xa56635;
     const houses = [[-14, -4], [-14, 4], [-7, -10], [9, -8], [14, 2], [12, 10], [-4, 12], [-13, 12],
@@ -380,12 +429,75 @@ export function buildWorld(THREE, scene, level) {
     box(5.6, 0.6, 1, 0x8a5a2e, 0, 15, 3.4);
     addLandmark({ x: 0, z: 15, r: 4, icon: '⛩️', title: 'CITY GATE',
       fact: 'Travellers entered the planned city through gates like this one.', signY: 5 });
+    // ---- SOUTH HOMES — second residential quarter, varied sizes ----
+    [[-16, 22, 2.6], [-10, 24, 3.4], [-4, 22, 2.9], [2, 26, 2.5]].forEach(([x, z, h], i) => {
+      const c = i % 2 ? brick2 : brick;
+      box(4.5, h, 4, c, x, z, 0, (i % 2) * -0.12, 3);
+      box(5, 0.35, 4.5, 0x8a5a2e, x, z, h);
+      box(1.1, 1.7, 0.2, 0x3a2412, x + 1, z - 2.05, 0);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.1),
+        new THREE.MeshStandardMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.3 }));
+      win.position.set(x - 1.2, 1.6, z - 2.02); scene.add(win);
+    });
+    pot(-13, 23); pot(-7, 25); banner(-1, 24, 0x3d8a4f);
+    addLandmark({ x: -7, z: 23, r: 4.5, icon: '🏘️', title: 'SOUTH HOMES',
+      fact: 'Families lived in sturdy brick houses along straight, planned streets.', signY: 4.6 });
+    // ---- WEST FARMS — fields, hut, scarecrow, trough, cart ----
+    for (let rz = 0; rz < 4; rz++) {
+      box(8, 0.12, 1.1, 0x6b4a26, -26.5, -18 + rz * 2, 0);
+      for (let rx = 0; rx < 6; rx++) {
+        const crop = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.8, 7),
+          new THREE.MeshStandardMaterial({ color: rx % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
+        crop.position.set(-30 + rx * 1.4, 0.5, -18 + rz * 2); crop.castShadow = true; scene.add(crop);
+      }
+    }
+    box(3.5, 2.6, 3, brick2, -26, -4, 0, 0.1, 2.2);                    // farm hut
+    const hutRoof = new THREE.Mesh(new THREE.ConeGeometry(3, 1.6, 4),
+      new THREE.MeshStandardMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
+    hutRoof.position.set(-26, 3.4, -4); hutRoof.rotation.y = Math.PI / 4; hutRoof.castShadow = true; scene.add(hutRoof);
+    cyl(0.09, 0.11, 2.2, 0x4a3220, -24, -14);                          // scarecrow
+    box(1.1, 0.12, 0.12, 0x4a3220, -24, -13.2, 0);
+    const scHead = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xd9b06a, roughness: 0.9 }));
+    scHead.position.set(-24, 2.35, -14); scene.add(scHead);
+    box(1.6, 0.5, 0.7, 0x7a5228, -27, -9, 0);                          // trough
+    cart(-22, -14, -0.5);
+    addLandmark({ x: -26, z: -14, r: 5, icon: '🌾', title: 'FARMLANDS',
+      fact: 'Wheat and barley from fields like these fed the entire city.', signY: 4.6 });
+    // ---- EAST WORKSHOPS — sheds, kiln, carts ----
+    [[26, -4], [26, 4]].forEach(([sx, sz]) => {
+      [[-1.5, -1], [1.5, -1], [-1.5, 1], [1.5, 1]].forEach(([ox, oz]) =>
+        cyl(0.12, 0.14, 2.2, 0x4a3220, sx + ox, sz + oz));
+      box(4.2, 0.25, 3.2, 0x8a5a2e, sx, sz, 2.2);
+      box(1.6, 0.8, 1, 0x9a6a35, sx, sz, 0, 0.2, 1.2);                  // worktable
+      box(0.6, 0.6, 0.6, 0x7a5228, sx + 1.4, sz + 0.6, 0, -0.2);
+    });
+    const kiln = new THREE.Mesh(new THREE.SphereGeometry(1.7, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x8a4a2e, roughness: 0.9 }));
+    kiln.position.set(28, 0, -10); kiln.castShadow = true; scene.add(kiln);
+    cyl(0.3, 0.38, 2.2, 0x6b3a22, 28, -10, 1.2);
+    const kilnFire = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0xff7a00, emissive: 0xff5500, emissiveIntensity: 2.5 }));
+    kilnFire.position.set(28, 0.5, -8.2); scene.add(kilnFire);
+    H.colliders.push({ x: 28, z: -10, r: 1.9 });
+    addLandmark({ x: 26, z: 0, r: 4.5, icon: '🧱', title: 'BRICK WORKSHOPS',
+      fact: 'Kilns fired the standard-sized bricks that built the whole city.', signY: 4.6 });
+    // ---- market extras: trade tables, baskets, carts ----
+    box(1.5, 0.7, 1, 0x9a6a35, -7, 1.5, 0, 0.1, 0.9);
+    box(1.5, 0.7, 1, 0x8a5a35, -4, 1, 0, -0.15, 0.9);
+    cyl(0.45, 0.35, 0.7, 0xb5894e, -5.5, 0.2, 0);
+    cart(-2, 3, 0.4);
+    tree(6, 24, 1); tree(-6, 24, 1); tree(-1, 29, 1.1);
+    // ---- ambient life ----
+    ambient(0x3d7bd9, [[-11, 5], [-2, 5.5], [-2, 9], [-11, 9]]);
+    ambient(0x6fae4e, [[-28, -11], [-23, -11], [-23, -16], [-28, -16]]);
+    ambient(0xb5542d, [[-4, 19], [4, 19]]);
     pot(-7, 5); pot(-7.6, 5.3); pot(11, 3);
     tree(16, -12); tree(-18, -10); tree(18, 12); banner(-11, -2, 0xd94f3d); torch(0, -16); torch(3, -16);
     P.items = [[-4.5, 6.5, 'tablet'], [-9, 0, 'tablet'], [3.4, -8, 'tablet'], [0, 18, 'tablet'], [-11, -14, 'tablet']];
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
   } else if (level.id === 2) {
-    P.bounds = 32;
+    P.bounds = 40;
     // Nalanda: courtyards, stupas, library, observatory, gardens
     const stone = 0xcbb27f;
     [[-12, -6], [12, -6], [-12, 8], [12, 8]].forEach(([x, z]) => {
@@ -394,13 +506,51 @@ export function buildWorld(THREE, scene, level) {
         new THREE.MeshStandardMaterial({ color: 0xa5824f, roughness: 0.8 }));
       st.position.set(x, 4.1, z); st.rotation.y = Math.PI / 4; st.castShadow = true; scene.add(st);
     });
-    // library hall + book piles by the door
-    box(7, 3.4, 4, 0xb5894e, 0, 12, 0, 0, 4);
-    box(2, 2.4, 0.3, 0x4a2f14, 0, 9.9, 0);
-    [[2.6, 9.6, 0xd94f3d], [3.1, 9.7, 0x3d7bd9], [2.85, 10.1, 0x3d8a4f]].forEach(([bx3, bz3, bc]) =>
-      box(0.5, 0.35, 0.7, bc, bx3, bz3, 0, 0.3));
+    // ---- WEST LEARNING HALLS — two varied lecture buildings ----
+    box(6, 3.5, 5, 0xcbb27f, -22, 6, 0, 0, 3.8);
+    box(6.6, 0.4, 5.6, 0xa5824f, -22, 6, 3.5);
+    [[-24.2, 3.2], [-19.8, 3.2]].forEach(([px, pz]) => cyl(0.24, 0.28, 2.6, 0xc9a05e, px, pz));
+    box(5, 3, 4, 0xbf9f6a, -22, 14, 0, 0.08, 3.2);
+    box(2, 2.2, 0.3, 0x4a2f14, -22, 11.9, 0);
+    // open-air study desks under the trees
+    [[-16, 8], [-14.5, 9.5]].forEach(([dx, dz], i) => {
+      box(1.4, 0.6, 0.9, 0x8a5a35, dx, dz, 0, i * 0.3, 0.8);
+      box(0.4, 0.3, 0.5, 0xd94f3d, dx, dz, 0.6, -i * 0.2);
+    });
+    addLandmark({ x: -22, z: 10, r: 4.5, icon: '🎓', title: 'LEARNING HALLS',
+      fact: 'Students debated logic, grammar and philosophy in halls like these.', signY: 5 });
+    // ---- GREAT LIBRARY — enterable: walk through the door, browse the shelves ----
+    box(8.4, 0.14, 5.8, 0x8a6f45, 0, 12, 0);                             // floor
+    [[-2.7], [0], [2.7]].forEach(([wx]) => {                             // back wall
+      box(2.6, 3.2, 0.5, 0xb5894e, wx, 14.5, 0);
+      H.colliders.push({ x: wx, z: 14.5, r: 1.3 });
+    });
+    [-4, 4].forEach(wx => {                                              // side walls
+      box(0.5, 3.2, 5.4, 0xb5894e, wx, 12, 0);
+      H.colliders.push({ x: wx, z: 11, r: 1.3 }, { x: wx, z: 13.5, r: 1.3 });
+    });
+    [-2.7, 2.7].forEach(wx => {                                          // front wall + open door
+      box(2.6, 3.2, 0.5, 0xb5894e, wx, 9.5, 0);
+      H.colliders.push({ x: wx, z: 9.5, r: 1.3 });
+    });
+    [-1.4, 1.4].forEach(wx => cyl(0.2, 0.24, 3, 0x6a4a2a, wx, 9.5));      // door posts
+    H.colliders.push({ x: -1.4, z: 9.5, r: 0.4 }, { x: 1.4, z: 9.5, r: 0.4 });
+    box(8.8, 0.4, 6.2, 0x8a6a45, 0, 12, 3.4);                            // roof slab
+    [[-3.7, 10], [3.7, 10], [-3.7, 14], [3.7, 14]].forEach(([px, pz]) => {
+      cyl(0.22, 0.26, 3.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.4 });
+    });
+    [-2.6, 2.6].forEach(sx => [11.8, 13.2].forEach(sz => {               // shelf rows, open aisle
+      box(1.6, 1.7, 0.6, 0x6a4a2a, sx, sz, 0);
+      const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.2, 8),
+        new THREE.MeshStandardMaterial({ color: 0xe8c547, roughness: 0.7 }));
+      roll.rotation.z = Math.PI / 2; roll.position.set(sx, 1.85, sz); scene.add(roll);
+      H.colliders.push({ x: sx, z: sz, r: 1.0 });
+    }));
+    box(1.4, 0.6, 0.9, 0x8a5a35, 2.6, 10.8, 0, 0.1, 0.8);                // reading table
+    [[-2.6, 10.6, 0xd94f3d], [-2.1, 10.8, 0x3d7bd9], [-2.35, 11.1, 0x3d8a4f]].forEach(([bx3, bz3, bc]) =>
+      box(0.5, 0.35, 0.7, bc, bx3, bz3, 0, 0.3));                        // book piles inside
     addLandmark({ x: 0, z: 12, r: 5, icon: '📚', title: 'THE GREAT LIBRARY',
-      fact: 'Nalanda’s libraries are said to have held lakhs of handwritten manuscripts!', signY: 5.4 });
+      fact: 'Nalanda’s libraries are said to have held lakhs of handwritten manuscripts! You can walk inside.', signY: 5.4 });
     // observatory platform + stargazing tube
     cyl(3, 3.4, 1, 0x9a9a9a, -14, -14); H.colliders.push({ x: -14, z: -14, r: 3.4 });
     cyl(0.15, 0.15, 3, 0x6a4a1a, -14, -14, 1);
@@ -417,8 +567,54 @@ export function buildWorld(THREE, scene, level) {
       fact: 'Quiet gardens where monks walked, debated and meditated.', signY: 3.6 });
     // garden grove — curated border positions (never random: random clusters
     // can trap the player between trunks). All >=4 apart, off all paths.
-    [[-20, -2], [-20, 6], [-20, 12], [-10, 14], [2, 16], [20, 12], [20, 6], [20, -2]]
+    [[-20, -2], [-16, 2], [-20, 12], [-10, 14], [2, 16], [20, 12], [20, 6], [20, -2]]
       .forEach(([x, z]) => tree(x, z, 0.9 + R() * 0.3));
+    // ---- READING GARDEN — hedges, pond, benches, lanterns ----
+    [[-4, 21], [0, 21], [4, 21]].forEach(([hx, hz]) => {
+      box(3, 1, 1, 0x2f7a3e, hx, hz, 0, 0, 1.3);
+    });
+    [[-2, 25], [2, 25]].forEach(([hx, hz]) => {
+      box(3, 1, 1, 0x3e8e4f, hx, hz, 0, 0, 1.3);
+    });
+    const pond = new THREE.Mesh(new THREE.CircleGeometry(2, 20),
+      new THREE.MeshStandardMaterial({ color: 0x35b6d9, roughness: 0.2 }));
+    pond.rotation.x = -Math.PI / 2; pond.position.set(0, 0.03, 23); scene.add(pond);
+    H.colliders.push({ x: 0, z: 23, r: 2.2 });
+    [[-3.5, 23.5], [3.5, 23.5]].forEach(([bx4, bz4]) => {
+      box(1.4, 0.45, 0.5, 0x8a5a35, bx4, bz4, 0, 0, 0.7);
+    });
+    [[-5, 22], [5, 22], [0, 26.5]].forEach(([lx, lz]) => {
+      cyl(0.18, 0.24, 0.9, 0x9a9a9a, lx, lz);
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4),
+        new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.2 }));
+      lamp.position.set(lx, 1.1, lz); scene.add(lamp);
+    });
+    tree(-5, 26, 0.9); tree(5, 27, 1);
+    addLandmark({ x: 0, z: 23, r: 4.5, icon: '🪷', title: 'READING GARDEN',
+      fact: 'Students read and memorised verses beside quiet lotus ponds.', signY: 4.4 });
+    // ---- SOUTH GATE + reception pavilion ----
+    [-2.5, 2.5].forEach(gx => { cyl(0.4, 0.5, 4.2, 0xcbb27f, gx, 26); H.colliders.push({ x: gx, z: 26, r: 0.7 }); });
+    box(7, 0.7, 1.2, 0xa5824f, 0, 26, 4.2);
+    [-7, 7].forEach(gx => {
+      box(5, 3, 1, 0xcbb27f, gx, 26, 0, 0, 2.5);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1, 4),
+        new THREE.MeshStandardMaterial({ color: 0xa5824f, roughness: 0.8, flatShading: true }));
+      cap.position.set(gx, 3.5, 26); cap.rotation.y = Math.PI / 4; scene.add(cap);
+    });
+    banner(-3.5, 26, 0xe8c547); banner(3.5, 26, 0xe8c547);
+    const spath = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 11),
+      new THREE.MeshStandardMaterial({ color: 0xf5e6c4, roughness: 0.9 }));
+    spath.rotation.x = -Math.PI / 2; spath.position.set(0, 0.02, 30.5); scene.add(spath);
+    box(6, 0.4, 4, 0xd9c48f, 0, 33, 0);
+    box(2, 0.8, 1.2, 0x8a5a35, 0, 33, 0.4, 0, 1.2);
+    box(0.45, 0.3, 0.6, 0xd94f3d, -0.5, 33.3, 0.8);
+    box(0.45, 0.3, 0.6, 0x3d7bd9, 0.4, 33.1, 0.8);
+    tree(-8, 32, 1); tree(8, 32, 1);
+    addLandmark({ x: 0, z: 30, r: 4, icon: '⛩️', title: 'UNIVERSITY GATE',
+      fact: 'Travellers from many lands entered Nalanda through gates like this.', signY: 5.6 });
+    // ---- ambient scholars ----
+    ambient(0x2e7d8a, [[-4, 1], [4, 1], [4, 7], [-4, 7]]);
+    ambient(0xcf7a1e, [[-18, 9], [-14, 12]]);
     // scholar quarter huts (thatched bunks for far-travelled students)
     [[-18, 4], [17, -4]].forEach(([hx, hz]) => {
       box(3.5, 2.4, 3, 0xa5824f, hx, hz, 0, 0, 2.2);
@@ -444,7 +640,7 @@ export function buildWorld(THREE, scene, level) {
     P.items = [[-9, -2, 'scroll'], [-14, -10.5, 'scroll'], [4.5, 6.5, 'scroll'], [0, 10.5, 'scroll'], [14, -2, 'scroll']];
     P.gate = [0, -19]; P.seal = [0, -14]; P.portal = [8, -19];
   } else if (level.id === 3) {
-    P.bounds = 32;
+    P.bounds = 40;
     // Chola: giant temple, gopuram colours, port with boats, village
     const sand = 0xd9b06a;
     box(6, 7, 6, sand, 0, -14, 0, 0, 5);                       // sanctum
@@ -463,6 +659,18 @@ export function buildWorld(THREE, scene, level) {
       fact: 'Chola kings raised soaring stone temples — like Thanjavur’s Brihadeeswara!', signY: 14 });
     // courtyard pillars
     for (let i = -2; i <= 2; i++) { cyl(0.35, 0.4, 3, 0xc9a05e, i * 3, -4); H.colliders.push({ x: i * 3, z: -4, r: 0.6 }); }
+    // gopuram gateway south of the sanctum — tiered towers flank the path
+    [-3, 3].forEach(gx => {
+      box(2, 2.4, 2, 0xc09a55, gx, -1, 0, 0, 1.4);
+      box(1.5, 1.6, 1.5, 0xb5822e, gx, -1, 2.4);
+      box(1, 1.2, 1, 0xd94f3d, gx, -1, 4);
+      const gf = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8),
+        new THREE.MeshStandardMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 1 }));
+      gf.position.set(gx, 5, -1); scene.add(gf);
+    });
+    box(8.4, 0.6, 1.4, 0x8a5a35, 0, -1, 5.2);
+    addLandmark({ x: 0, z: -1, r: 3.6, icon: '🛕', title: 'TEMPLE GATEWAY',
+      fact: 'Towering gopurams announced the temple long before you reached it.', signY: 6.8 });
     // port: water strip + boats
     const sea = new THREE.Mesh(new THREE.PlaneGeometry(60, 14),
       new THREE.MeshStandardMaterial({ color: 0x2e8fc4, roughness: 0.2 }));
@@ -472,9 +680,21 @@ export function buildWorld(THREE, scene, level) {
       box(3.2, 0.7, 1.2, 0x6b4423, x, z, 0.1, i * 0.3);
       cyl(0.06, 0.06, 2.6, 0x4a3220, x, z, 0.4);
     });
+    // wooden pier + cargo over the shallows (scenery — keep off it)
+    box(5, 0.3, 2, 0x7a5228, -14, 17.5, 0.3);
+    H.colliders.push({ x: -14, z: 17.5, r: 2.2 });
+    [[-16, 17.5], [-12, 17.5]].forEach(([px, pz]) => cyl(0.12, 0.14, 1.2, 0x4a3220, px, pz));
+    box(0.9, 0.9, 0.9, 0x9a6a35, -15.5, 18, 0.6, 0.3, 1.0);
+    box(0.7, 0.7, 0.7, 0x7a5228, -13.5, 17.2, 0.6, -0.2, 0.9);
+    cyl(0.5, 0.55, 0.8, 0x8a5a35, -12.5, 18.5);
+    const rope = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.12, 8, 16),
+      new THREE.MeshStandardMaterial({ color: 0xc9a05e, roughness: 0.9 }));
+    rope.rotation.x = Math.PI / 2; rope.position.set(-16.5, 0.55, 17); scene.add(rope);
     addLandmark({ x: -16, z: 13, r: 5, icon: '⛵', title: 'HARBOR',
       fact: 'Chola ships carried spices — and stories — across the seas!', signY: 4.4 });
     stall(8, 6, 0x4aa3df); stall(11, 6, 0xd94f3d, -0.2);
+    stall(-2, 12, 0x3d8a4f, 0.1); stall(2, 12, 0xe8a13c, -0.1);
+    pot(-3.5, 13); pot(3.5, 13.2);
     addLandmark({ x: 9.5, z: 6, r: 4, icon: '🏪', title: 'MARKET',
       fact: 'Craftspeople sold bronze lamps, spices and cloth from busy stalls.', signY: 4.2 });
     pot(9, 7); tree(-6, 10); tree(16, -2); banner(4, -6, 0x4aa3df); banner(-4, -6, 0xffd23e);
@@ -489,17 +709,42 @@ export function buildWorld(THREE, scene, level) {
     addLandmark({ x: -12, z: 2, r: 3.6, icon: '🗿', title: 'SCULPTOR’S WORKSHOP',
       fact: 'Master carvers shaped gods, dancers and guardians from plain rock.', signY: 4.4 });
     // village streets east of the market
-    [[15, 2], [19, 9]].forEach(([hx, hz]) => {
+    [[15, 2], [19, 9], [12, 12]].forEach(([hx, hz]) => {
       box(4, 2.8, 3.5, 0xd9b06a, hx, hz, 0, 0.1, 2.5);
       const roof = new THREE.Mesh(new THREE.ConeGeometry(3.2, 1.5, 4),
         new THREE.MeshStandardMaterial({ color: 0x8a4a2e, roughness: 0.9, flatShading: true }));
       roof.position.set(hx, 3.5, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true; scene.add(roof);
     });
     pot(16, 7.5);
+    // village well + grain plots
+    cyl(0.9, 1, 1, 0x7a5a3a, 21, 14); H.colliders.push({ x: 21, z: 14, r: 1.2 });
+    for (let fr = 0; fr < 3; fr++)
+      box(4, 0.12, 0.9, 0x5a7a35, 15, 15.5 + fr * 1.4, 0);
+    cart(8, 15, 0.9);
+    addLandmark({ x: 16, z: 7, r: 4.5, icon: '🏡', title: 'VILLAGE',
+      fact: 'Farmers, potters and herders lived in villages around the temple city.', signY: 4.8 });
+    // ---- ROYAL COURT — pillared hall, dais and throne (inspired, not a specific palace) ----
+    box(9, 0.5, 7, 0xc09a55, 16, -18, 0);
+    [[13, -20.5], [16, -20.5], [19, -20.5], [13, -15.5], [16, -15.5], [19, -15.5]].forEach(([px, pz]) => {
+      cyl(0.3, 0.36, 3.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.5 });
+    });
+    box(9.6, 0.4, 7.6, 0x8a5a35, 16, -18, 3.4);
+    box(2.4, 0.9, 1.6, 0x8a6a45, 16, -19.5, 0.5);                  // dais
+    box(1.2, 1.1, 0.8, 0xa8232a, 16, -19.5, 1.2);                 // throne seat
+    const rcarpet = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5),
+      new THREE.MeshStandardMaterial({ color: 0xa8232a, roughness: 0.9 }));
+    rcarpet.rotation.x = -Math.PI / 2; rcarpet.position.set(16, 0.53, -17); scene.add(rcarpet);
+    banner(12.5, -15, 0xd94f3d); banner(19.5, -15, 0xffd23e);
+    addLandmark({ x: 16, z: -18, r: 5, icon: '👑', title: 'ROYAL COURT',
+      fact: 'Chola kings administered a vast realm — from courts much like this one.', signY: 5.4 });
+    // ---- ambient life ----
+    ambient(0xd9b06a, [[14, 5], [19, 8]]);
+    ambient(0x1e6f9c, [[-17, 12], [-12, 14]]);
+    ambient(0x7a3b2e, [[12, -14], [12, -22]]);
     P.items = [[-10, -0.5, 'piece'], [-12, 2, 'piece'], [8, 7.5, 'piece'], [-15, 11, 'piece'], [16.5, 5.5, 'piece']];
     P.gate = [0, -20.5]; P.seal = [0, -5.5]; P.portal = [8, -20.5];
   } else if (level.id === 4) {
-    P.bounds = 30;
+    P.bounds = 38;
     // Fort: high walls, towers, gate arch, courtyard, secret chamber door
     const wall = 0xc08a4e;
     [[0, -22, 30, 2], [-16, -8, 2, 26], [16, -8, 2, 26]].forEach(([x, z, w, d]) => {
@@ -522,6 +767,48 @@ export function buildWorld(THREE, scene, level) {
     stall(-4, 14, 0x3d7bd9, 0.15); stall(4, 14, 0xd94f3d, -0.15);
     addLandmark({ x: 0, z: 16, r: 4.5, icon: '🏘️', title: 'ARTISANS’ WARD',
       fact: 'Smiths, weavers and potters lived and worked within the fort’s protection.', signY: 4.8 });
+    // ---- OUTER GATE — twin towers, arch, road, barracks, training yard ----
+    [-4, 4].forEach(tx => {
+      cyl(1.8, 2.2, 8, 0xa5763e, tx, 26); H.colliders.push({ x: tx, z: 26, r: 2.4 });
+      const dome2 = new THREE.Mesh(new THREE.SphereGeometry(1.8, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0xe8d8a8, roughness: 0.6 }));
+      dome2.position.set(tx, 8, 26); dome2.castShadow = true; scene.add(dome2);
+    });
+    box(12.4, 1, 1.6, 0x8a5a35, 0, 26, 8);
+    box(1.6, 3.4, 0.4, 0x3a2412, -2.9, 26, 0, -0.35);
+    box(1.6, 3.4, 0.4, 0x3a2412, 2.9, 26, 0, 0.35);
+    const oroad = new THREE.Mesh(new THREE.PlaneGeometry(7, 16),
+      new THREE.MeshStandardMaterial({ color: 0xd9bd85, roughness: 0.95 }));
+    oroad.rotation.x = -Math.PI / 2; oroad.position.set(0, 0.02, 26); scene.add(oroad);
+    banner(-6.5, 24, 0xd94f3d); banner(6.5, 24, 0xffd23e);
+    [[-9, 30], [9, 30]].forEach(([bx5, bz5]) => {
+      box(5, 3, 3, 0xc08a4e, bx5, bz5, 0, 0, 2.8);
+      box(5.5, 0.35, 3.5, 0x8a5a2e, bx5, bz5, 3);
+    });
+    [[-4.5, 22], [4.5, 22]].forEach(([dx, dz]) => {           // training dummies
+      cyl(0.12, 0.14, 1.8, 0x6b4423, dx, dz);
+      box(1.1, 0.18, 0.18, 0x6b4423, dx, dz, 1.2);
+      H.colliders.push({ x: dx, z: dz, r: 0.4 });
+    });
+    addLandmark({ x: 0, z: 26, r: 5, icon: '🏰', title: 'OUTER GATE',
+      fact: 'Armies, traders and travellers all passed beneath gates like this.', signY: 9.4 });
+    // ---- ROYAL COURT (diwan) — dais, throne, carpet, banners ----
+    box(9, 0.5, 7, 0xc09a55, 24, -8, 0);
+    [[21, -10.5], [24, -10.5], [27, -10.5], [21, -5.5], [24, -5.5], [27, -5.5]].forEach(([px, pz]) => {
+      cyl(0.3, 0.36, 3.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.5 });
+    });
+    box(9.6, 0.4, 7.6, 0x8a5a35, 24, -8, 3.4);
+    box(2.4, 0.9, 1.6, 0x8a6a45, 24, -9.5, 0.5);
+    box(1.2, 1.1, 0.8, 0xa8232a, 24, -9.5, 1.2);
+    const dcarpet2 = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5),
+      new THREE.MeshStandardMaterial({ color: 0xa8232a, roughness: 0.9 }));
+    dcarpet2.rotation.x = -Math.PI / 2; dcarpet2.position.set(24, 0.53, -7); scene.add(dcarpet2);
+    banner(20.5, -5, 0xd94f3d); banner(27.5, -5, 0xffd23e);
+    addLandmark({ x: 24, z: -8, r: 5, icon: '👑', title: 'ROYAL COURT',
+      fact: 'Rulers held court, heard petitions and planned campaigns in halls like this.', signY: 5.4 });
+    // ---- ambient guards ----
+    ambient(0x7a3b2e, [[-10, -18], [10, -18]]);
+    ambient(0x4a5d8a, [[6, -2], [6, 3]]);
     // annex garden with fountain, east side
     tree(20, 2, 0.7); tree(22, 8, 0.7);
     cyl(1.5, 1.7, 0.6, 0x9a9a9a, 20, 5);
@@ -529,6 +816,32 @@ export function buildWorld(THREE, scene, level) {
       new THREE.MeshStandardMaterial({ color: 0x35b6d9, roughness: 0.2 }));
     fw.rotation.x = -Math.PI / 2; fw.position.set(20, 0.65, 5); scene.add(fw);
     H.colliders.push({ x: 20, z: 5, r: 1.6 });
+    // ---- WEST GARDEN — trees, flower beds, bench ----
+    tree(-22, 4, 0.8); tree(-18, 8, 0.8);
+    [[-21, 7, 0xd94f3d], [-19, 5, 0xe8a13c], [-22, 6, 0x8a4fa8]].forEach(([fx2, fz2, fc]) =>
+      box(1.6, 0.4, 1, fc, fx2, fz2, 0, 0.2));
+    box(1.6, 0.45, 0.55, 0x7a5228, -20, 9.5, 0, -0.2, 0.7);
+    // ---- LOOKOUT TOWER — tall, flagged, with railed platform ----
+    cyl(2, 2.4, 10, 0xa5763e, -20, -14); H.colliders.push({ x: -20, z: -14, r: 2.6 });
+    const plat = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.4, 12),
+      new THREE.MeshStandardMaterial({ color: 0x8a5a35, roughness: 0.8 }));
+    plat.position.set(-20, 10.2, -14); plat.castShadow = true; scene.add(plat);
+    const rail = new THREE.Mesh(new THREE.TorusGeometry(2.9, 0.09, 8, 20),
+      new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.8 }));
+    rail.rotation.x = Math.PI / 2; rail.position.set(-20, 11.1, -14); scene.add(rail);
+    cyl(0.07, 0.09, 2.6, 0x4a3220, -20, -14, 10.4);
+    const lflag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8),
+      new THREE.MeshStandardMaterial({ color: 0xffd23e, side: THREE.DoubleSide }));
+    lflag.position.set(-19.3, 12.6, -14); scene.add(lflag);
+    H.dynamics.push((dt, t) => { lflag.rotation.y = Math.sin(t * 2.4) * 0.4; });
+    addLandmark({ x: -20, z: -14, r: 4, icon: '🗼', title: 'LOOKOUT TOWER',
+      fact: 'Watchmen scanned the horizon from towers like this one.', signY: 12.6 });
+    // ---- PROCESSIONAL COLONNADE along the main axis ----
+    [[-5, -4], [5, -4], [-5, 0], [5, 0], [-5, 4], [5, 4]].forEach(([cx3, cz3]) => {
+      cyl(0.3, 0.36, 3.2, 0xc9a05e, cx3, cz3); H.colliders.push({ x: cx3, z: cz3, r: 0.45 });
+    });
+    box(0.5, 0.4, 13, 0x8a5a35, -5, 0, 3.3);
+    box(0.5, 0.4, 13, 0x8a5a35, 5, 0, 3.3);
     const carpet = new THREE.Mesh(new THREE.PlaneGeometry(3, 6),
       new THREE.MeshStandardMaterial({ color: 0xa8232a, roughness: 0.9 }));
     carpet.rotation.x = -Math.PI / 2; carpet.position.set(-8, 0.03, 3.5); scene.add(carpet);
