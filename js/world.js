@@ -1,6 +1,8 @@
 // Procedural stylized environments — one builder per era, shared helpers.
 // No external models; lighting + fog + props keep every level distinct.
 import { ARTIFACT_INFO } from './data.js';
+import { Save } from './save.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 function rng(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
 
@@ -15,6 +17,16 @@ export function buildWorld(THREE, scene, level) {
     gate: null, seal: null, portal: null
   };
 
+  // ============ SLICE 3: quality profile (visual only — same gameplay) ============
+  // high: full detail · medium: balanced · low: aggressive (also auto-tightened on touch devices)
+  const QNAME = (Save.data && Save.data.settings && Save.data.settings.quality) || 'high';
+  const IS_TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const Q = {
+    lodScale: (QNAME === 'low' ? 0.7 : QNAME === 'medium' ? 1.0 : 1.35) * (IS_TOUCH ? 0.85 : 1),
+    fogFar: QNAME === 'low' ? 92 : QNAME === 'medium' ? 110 : 125,
+    grassHalf: QNAME === 'low',
+    fxOn: QNAME !== 'low'
+  };
   // ============ VISUAL SYSTEMS: material cache, canvas textures, glow, sky ============
   // All shared/cached — identical property sets reuse one GPU program/material.
   const matCache = new Map();
@@ -195,7 +207,7 @@ export function buildWorld(THREE, scene, level) {
 
   // ---------- atmosphere ----------
   buildSky();
-  scene.fog = new THREE.Fog(level.fog, 34, 125);
+  scene.fog = new THREE.Fog(level.fog, 34, Q.fogFar);
   const hemi = new THREE.HemisphereLight(0xffffff, level.ground, 0.85);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
@@ -219,19 +231,15 @@ export function buildWorld(THREE, scene, level) {
   scene.add(plaza);
 
   const box = (w, h, d, color, x, z, y = 0, ry = 0, collide = 0, tex = null) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-      tex ? getMaterial({ color: 0xffffff, roughness: 0.92, map: tex }) : getMaterial({ color, roughness: 0.85 }));
-    m.position.set(x, y + h / 2, z); m.rotation.y = ry;
-    m.castShadow = true; m.receiveShadow = true;
-    scene.add(m);
+    const mat = tex ? getMaterial({ color: 0xffffff, roughness: 0.92, map: tex }) : getMaterial({ color, roughness: 0.85 });
+    bakeStatic(new THREE.BoxGeometry(w, h, d), mat, x, y + h / 2, z, ry);
     if (collide) H.colliders.push({ x, z, r: collide });
-    return m;
+    return null; // static-batched; return value was never consumed
   };
   const cyl = (rt, rb, h, color, x, z, y = 0, seg = 12, tex = null) => {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg),
-      tex ? getMaterial({ color: 0xffffff, roughness: 0.9, map: tex }) : getMaterial({ color, roughness: 0.8 }));
-    m.position.set(x, y + h / 2, z); m.castShadow = true;
-    scene.add(m); return m;
+    const mat = tex ? getMaterial({ color: 0xffffff, roughness: 0.9, map: tex }) : getMaterial({ color, roughness: 0.8 });
+    bakeStatic(new THREE.CylinderGeometry(rt, rb, h, seg), mat, x, y + h / 2, z);
+    return null; // static-batched; return value was never consumed
   };
 
   // distant hills + clouds (depth on zero budget)
@@ -254,17 +262,8 @@ export function buildWorld(THREE, scene, level) {
   // ---------- shared props ----------
   const LEAF = [0x3e8e4f, 0x4da35a, 0x2f7a3e, 0x6fae4e];
   function tree(x, z, s = 1) {
-    cyl(0.22 * s, 0.34 * s, 1.7 * s, 0xffffff, x, z, 0, 12, T_wood('#6b4423'));
-    // layered canopy — three blobs so it reads as a real tree, not a lollipop
-    const blobs = [
-      [0, 2.5, 0, 1.35], [0.75, 2.0, 0.3, 0.9], [-0.7, 2.05, -0.35, 0.95], [0.1, 3.15, -0.1, 0.8]
-    ];
-    blobs.forEach(([ox, oy, oz, r], i) => {
-      const c = new THREE.Mesh(new THREE.SphereGeometry(r * s, 12, 10),
-        getMaterial({ color: LEAF[(i + (x > 0 ? 1 : 0)) % LEAF.length], roughness: 0.95, flatShading: true }));
-      c.position.set(x + ox * s, oy * s, z + oz * s);
-      c.castShadow = true; scene.add(c);
-    });
+    // Trunk + canopy bake instanced at end (2 draws for ALL trees).
+    TREE_TRUNKS.push({ x, z, s });
     if (s > 1.7) { // banyan: hanging aerial roots + wide shade
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
@@ -439,10 +438,17 @@ export function buildWorld(THREE, scene, level) {
     for (let i = 0; i <= m; i++) { const t = i / m; H.colliders.push({ x: x1 + dx * t, z: z1 + dz * t, r: 2 }); }
   }
   function wallTower(x, z, r = 2.2, h = 6, color = 0xa5763e) {
-    cyl(r * 0.9, r, h, 0xffffff, x, z, 0, 12, T_stone('#' + color.toString(16).padStart(6, '0')));
+    const stoneM = getMaterial({ color: 0xffffff, roughness: 0.9, map: T_stone('#' + color.toString(16).padStart(6, '0')) });
+    const full = new THREE.Group();
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.9, r, h, 12), stoneM);
+    t.position.y = h / 2; t.castShadow = true; full.add(t);
     const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 0.85, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
       getMaterial({ color: 0xffffff, roughness: 0.6, map: T_plaster('#e8d8a8', '#cfc09a') }));
-    dome.position.set(x, h, z); dome.castShadow = true; scene.add(dome);
+    dome.position.y = h; dome.castShadow = true; full.add(dome);
+    const far = new THREE.Group();
+    const s = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.1, h + 1, 7), stoneM);
+    s.position.y = (h + 1) / 2; far.add(s);
+    createLODObject([[0, full], [34, far]], x, 0, z);
     H.colliders.push({ x, z, r: r + 0.3 });
   }
   function houseV(x, z, o = {}) {
@@ -464,6 +470,74 @@ export function buildWorld(THREE, scene, level) {
     win.rotation.y = ry; scene.add(win);
   }
 
+  // ============ SLICE 3: static geometry batcher (visual only) ============
+  // Every box()/cyl() flows through here; identical cached materials merge
+  // into one mesh each. Colliders/gameplay are untouched (recorded separately).
+  const batches = new Map();
+  const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+  function bakeStatic(geo, mat, x, y, z, ry = 0, sx = 1, sy = 1, sz = 1) {
+    const g = geo.clone();
+    _e.set(0, ry, 0); _q.setFromEuler(_e);
+    g.applyMatrix4(_m4.compose(new THREE.Vector3(x, y, z), _q, new THREE.Vector3(sx, sy, sz)));
+    const key = mat.uuid;
+    if (!batches.has(key)) batches.set(key, { mat, geos: [] });
+    batches.get(key).geos.push(g);
+    return null; // NOTE: box()/cyl() return values were never consumed
+  }
+  function buildStatic() {
+    for (const { mat, geos } of batches.values()) {
+      if (!geos.length) continue;
+      const merged = mergeGeometries(geos, false);
+      geos.forEach(g => g.dispose());
+      if (!merged) continue;
+      const m = new THREE.Mesh(merged, mat);
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+    }
+    batches.clear();
+  }
+  // ============ SLICE 3: reusable LOD (visual only) ============
+  // createLODObject([{dist, build}], pos) — tiers swap by camera distance.
+  // Never used for player/NPCs/artifacts/puzzles/portals/seals.
+  function createLODObject(tiers, x, y, z) {
+    const lod = new THREE.LOD();
+    tiers.forEach(([dist, grp]) => lod.addLevel(grp, dist * Q.lodScale));
+    lod.position.set(x, y, z);
+    scene.add(lod);
+    return lod;
+  }
+  // Tree specs are collected, then baked as 2 InstancedMeshes (trunks+canopies).
+  const TREE_TRUNKS = [], TREE_CANOPIES = [];
+  function buildTreeInstances() {
+    if (!TREE_TRUNKS.length) return;
+    const trunkG = new THREE.CylinderGeometry(0.22, 0.34, 1.7, 7);
+    const canG = new THREE.SphereGeometry(1, 9, 7);
+    const trunkM = new THREE.InstancedMesh(trunkG, getMaterial({ color: 0xffffff, roughness: 0.9, map: T_wood('#6b4423') }), TREE_TRUNKS.length);
+    TREE_TRUNKS.forEach((t, i) => {
+      _dummy.position.set(t.x, 0.85 * t.s, t.z); _dummy.scale.setScalar(t.s);
+      _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+      trunkM.setMatrixAt(i, _dummy.matrix);
+      trunkM.setColorAt(i, _c.set(0xffffff));
+    });
+    const blobs = [[0, 2.5, 0, 1.35], [0.75, 2.0, 0.3, 0.9], [-0.7, 2.05, -0.35, 0.95], [0.1, 3.15, -0.1, 0.8]];
+    const canM = new THREE.InstancedMesh(canG, getMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true }), TREE_TRUNKS.length * 4);
+    let ci = 0;
+    TREE_TRUNKS.forEach((t) => {
+      blobs.forEach(([ox, oy, oz, r], bi) => {
+        _dummy.position.set(t.x + ox * t.s, oy * t.s, t.z + oz * t.s);
+        _dummy.scale.setScalar(r * t.s); _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        canM.setMatrixAt(ci, _dummy.matrix);
+        canM.setColorAt(ci, _c.set(LEAF[(bi + (t.x > 0 ? 1 : 0)) % LEAF.length]));
+        ci++;
+      });
+    });
+    [trunkM, canM].forEach(m => {
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+    });
+  }
   // ============ SLICE 2: instanced scatter + district helpers (visual only) ============
   // Scatter lists hold [x, z, ...] with NO colliders — safe for distant scenery
   // and small off-path decor. Near-field buildings use houseV/box (with colliders).
@@ -825,13 +899,20 @@ export function buildWorld(THREE, scene, level) {
       box(1.6, 0.8, 1, 0x9a6a35, sx, sz, 0, 0.2, 1.2);                  // worktable
       box(0.6, 0.6, 0.6, 0x7a5228, sx + 1.4, sz + 0.6, 0, -0.2);
     });
-    const kiln = new THREE.Mesh(new THREE.SphereGeometry(1.7, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-      getMaterial({ color: 0x8a4a2e, roughness: 0.9 }));
-    kiln.position.set(28, 0, -10); kiln.castShadow = true; scene.add(kiln);
+    {
+      const kilnM = getMaterial({ color: 0x8a4a2e, roughness: 0.9 });
+      const full = new THREE.Group();
+      const kd = new THREE.Mesh(new THREE.SphereGeometry(1.7, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), kilnM);
+      kd.castShadow = true; full.add(kd);
+      const kf = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8),
+        getMaterial({ color: 0xff7a00, emissive: 0xff5500, emissiveIntensity: 2.5 }));
+      kf.position.set(0, 0.5, 1.8); full.add(kf);
+      const far = new THREE.Group();
+      const sd = new THREE.Mesh(new THREE.SphereGeometry(1.7, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), kilnM);
+      far.add(sd);
+      createLODObject([[0, full], [38, far]], 28, 0, -10);
+    }
     cyl(0.3, 0.38, 2.2, 0x6b3a22, 28, -10, 1.2);
-    const kilnFire = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8),
-      getMaterial({ color: 0xff7a00, emissive: 0xff5500, emissiveIntensity: 2.5 }));
-    kilnFire.position.set(28, 0.5, -8.2); scene.add(kilnFire);
     H.colliders.push({ x: 28, z: -10, r: 1.9 });
     addLandmark({ x: 26, z: 0, r: 4.5, icon: '🧱', title: 'BRICK WORKSHOPS',
       fact: 'Kilns fired the standard-sized bricks that built the whole city.', signY: 4.6 });
@@ -1074,15 +1155,31 @@ export function buildWorld(THREE, scene, level) {
     houseV(-28, -6, { w: 2.2, h: 2.2, d: 2.4, c: 0xcbb27f, r: 1.5 });
     houseV(-28, 0, { w: 2.2, h: 2.4, d: 2.4, c: 0xbf9f6a, r: 1.5 });
     // ---- SLICE 2: north great stupa court ----
-    cyl(1.6, 2, 2.4, 0xffffff, 0, -33, 0, 14, T_stone('#d9c48f', '#b3a071'));
-    H.colliders.push({ x: 0, z: -33, r: 2.2 });
-    cyl(0.1, 0.12, 2.6, 0x6a4a2a, 0, -33, 2.4);
-    const umb = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.7, 10),
-      getMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 0.6 }));
-    umb.position.set(0, 4, -33); scene.add(umb);
-    for (let ri = 0; ri < 8; ri++) {
-      const a = (ri / 8) * Math.PI * 2;
-      cyl(0.09, 0.11, 1.1, 0x9a9a9a, Math.cos(a) * 3.4, -33 + Math.sin(a) * 3.4);
+    {
+      const stupaM = getMaterial({ color: 0xffffff, roughness: 0.9, map: T_stone('#d9c48f', '#b3a071') });
+      const full = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2, 2.4, 14), stupaM);
+      base.position.y = 1.2; base.castShadow = true; full.add(base);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 2.6, 8),
+        getMaterial({ color: 0x6a4a2a, roughness: 0.8 }));
+      pole.position.y = 3.7; full.add(pole);
+      const umb = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.7, 10),
+        getMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 0.6 }));
+      umb.position.y = 5.2; full.add(umb);
+      for (let ri = 0; ri < 8; ri++) {
+        const a = (ri / 8) * Math.PI * 2;
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 1.1, 7),
+          getMaterial({ color: 0x9a9a9a, roughness: 0.85 }));
+        post.position.set(Math.cos(a) * 3.4, 0.55, Math.sin(a) * 3.4); full.add(post);
+      }
+      const far = new THREE.Group();
+      const sb = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 2.1, 2.6, 8), stupaM);
+      sb.position.y = 1.3; far.add(sb);
+      const sc = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.4, 6),
+        getMaterial({ color: 0xa5824f, roughness: 0.8 }));
+      sc.position.y = 3.3; far.add(sc);
+      createLODObject([[0, full], [38, far]], 0, 0, -33);
+      H.colliders.push({ x: 0, z: -33, r: 2.2 });
     }
     addLandmark({ x: 0, z: -33, r: 4.5, icon: '🛕', title: 'GREAT STUPA',
       fact: 'Towering stupas held sacred relics and marked holy ground.', signY: 6 });
@@ -1227,12 +1324,24 @@ export function buildWorld(THREE, scene, level) {
     for (let i = -2; i <= 2; i++) { cyl(0.35, 0.4, 3, 0xffffff, i * 3, -4, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: i * 3, z: -4, r: 0.6 }); }
     // gopuram gateway south of the sanctum — tiered towers flank the path
     [-3, 3].forEach(gx => {
-      box(2, 2.4, 2, 0xffffff, gx, -1, 0, 0, 1.4, T_stone('#c09a55', '#9c7c48'));
-      box(1.5, 1.6, 1.5, 0xffffff, gx, -1, 2.4, 0, 0, T_stone('#b5822e', '#8f6a28'));
-      box(1, 1.2, 1, 0xd94f3d, gx, -1, 4);
+      const stoneA = getMaterial({ color: 0xffffff, roughness: 0.92, map: T_stone('#c09a55', '#9c7c48') });
+      const stoneB = getMaterial({ color: 0xffffff, roughness: 0.92, map: T_stone('#b5822e', '#8f6a28') });
+      const full = new THREE.Group();
+      const t1 = new THREE.Mesh(new THREE.BoxGeometry(2, 2.4, 2), stoneA);
+      t1.position.y = 1.2; t1.castShadow = true; full.add(t1);
+      const t2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.6, 1.5), stoneB);
+      t2.position.y = 3.2; t2.castShadow = true; full.add(t2);
+      const t3 = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 1),
+        getMaterial({ color: 0xd94f3d, roughness: 0.85 }));
+      t3.position.y = 4.6; full.add(t3);
       const gf = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8),
         getMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 1 }));
-      gf.position.set(gx, 5, -1); scene.add(gf);
+      gf.position.y = 5.4; full.add(gf);
+      const far = new THREE.Group();
+      const s = new THREE.Mesh(new THREE.BoxGeometry(2.2, 5.6, 2.2), stoneA);
+      s.position.y = 2.8; far.add(s);
+      createLODObject([[0, full], [36, far]], gx, 0, -1);
+      H.colliders.push({ x: gx, z: -1, r: 1.4 });
     });
     box(8.4, 0.6, 1.4, 0x8a5a35, 0, -1, 5.2);
     addLandmark({ x: 0, z: -1, r: 3.6, icon: '🛕', title: 'TEMPLE GATEWAY',
@@ -1341,12 +1450,23 @@ export function buildWorld(THREE, scene, level) {
       fact: 'Every temple began here — workers split living rock into perfect blocks.', signY: 4.4 });
     // ---- NORTH SHRINES + gardens ----
     [[-8, -28], [8, -28]].forEach(([sx, sz]) => {
-      box(4, 0.4, 4, 0xffffff, sx, sz, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
+      const platM = getMaterial({ color: 0xffffff, roughness: 0.92, map: T_stone('#c09a55', '#9c7c48') });
+      const full = new THREE.Group();
+      const pf = new THREE.Mesh(new THREE.BoxGeometry(4, 0.4, 4), platM);
+      pf.position.y = 0.2; pf.receiveShadow = true; full.add(pf);
       const vim2 = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 4),
         getMaterial({ color: 0xb5822e, roughness: 0.7, flatShading: true }));
-      vim2.position.set(sx, 2, sz); vim2.rotation.y = Math.PI / 4; vim2.castShadow = true; scene.add(vim2);
+      vim2.position.y = 2.2; vim2.rotation.y = Math.PI / 4; vim2.castShadow = true; full.add(vim2);
+      [[-1.5, 1.5], [1.5, 1.5]].forEach(([ox, oz]) => {
+        const pp = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 2, 8),
+          getMaterial({ color: 0xc9a05e, roughness: 0.9 }));
+        pp.position.set(ox, 1, oz); full.add(pp);
+      });
+      const far = new THREE.Group();
+      const pb = new THREE.Mesh(new THREE.BoxGeometry(4, 1.8, 4), platM);
+      pb.position.y = 0.9; far.add(pb);
+      createLODObject([[0, full], [38, far]], sx, 0, sz);
       H.colliders.push({ x: sx, z: sz, r: 1.8 });
-      [[-1.5, 1.5], [1.5, 1.5]].forEach(([ox, oz]) => cyl(0.14, 0.16, 2, 0xc9a05e, sx + ox, sz + oz));
     });
     tree(-12, -28, 0.9); tree(12, -28, 0.9);
     // village streets east of the market
@@ -1547,18 +1667,30 @@ export function buildWorld(THREE, scene, level) {
     wallRun(-20, -34, 20, -34, 3);
     wallTower(-32, 4); wallTower(36, 4); wallTower(-20, -34); wallTower(20, -34);
     // ---- LOOKOUT TOWER — tall, flagged, with railed platform ----
-    cyl(2, 2.4, 10, 0xffffff, -20, -14, 0, 12, T_stone('#a5763e', '#86603a')); H.colliders.push({ x: -20, z: -14, r: 2.6 });
-    const plat = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.4, 12),
-      getMaterial({ color: 0x8a5a35, roughness: 0.8 }));
-    plat.position.set(-20, 10.2, -14); plat.castShadow = true; scene.add(plat);
-    const rail = new THREE.Mesh(new THREE.TorusGeometry(2.9, 0.09, 8, 20),
-      getMaterial({ color: 0x6b4423, roughness: 0.8 }));
-    rail.rotation.x = Math.PI / 2; rail.position.set(-20, 11.1, -14); scene.add(rail);
-    cyl(0.07, 0.09, 2.6, 0x4a3220, -20, -14, 10.4);
-    const lflag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8),
-      getMaterial({ color: 0xffd23e, side: 2 }));
-    lflag.position.set(-19.3, 12.6, -14); scene.add(lflag);
-    H.dynamics.push((dt, t) => { lflag.rotation.y = Math.sin(t * 2.4) * 0.4; });
+    {
+      const stoneM = getMaterial({ color: 0xffffff, roughness: 0.9, map: T_stone('#a5763e', '#86603a') });
+      const full = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.4, 10, 12), stoneM);
+      body.position.y = 5; body.castShadow = true; full.add(body);
+      const plat = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.4, 12),
+        getMaterial({ color: 0x8a5a35, roughness: 0.8 }));
+      plat.position.y = 10.2; plat.castShadow = true; full.add(plat);
+      const rail = new THREE.Mesh(new THREE.TorusGeometry(2.9, 0.09, 8, 20),
+        getMaterial({ color: 0x6b4423, roughness: 0.8 }));
+      rail.rotation.x = Math.PI / 2; rail.position.y = 11.1; full.add(rail);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.6, 8),
+        getMaterial({ color: 0x4a3220, roughness: 0.8 }));
+      pole.position.y = 11.7; full.add(pole);
+      const lflag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8),
+        getMaterial({ color: 0xffd23e, side: 2 }));
+      lflag.position.set(0.7, 12.6, 0); full.add(lflag);
+      H.dynamics.push((dt, t) => { lflag.rotation.y = Math.sin(t * 2.4) * 0.4; });
+      const far = new THREE.Group();
+      const ss = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 11, 8), stoneM);
+      ss.position.y = 5.5; far.add(ss);
+      createLODObject([[0, full], [40, far]], -20, 0, -14);
+      H.colliders.push({ x: -20, z: -14, r: 2.6 });
+    }
     addLandmark({ x: -20, z: -14, r: 4, icon: '🗼', title: 'LOOKOUT TOWER',
       fact: 'Watchmen scanned the horizon from towers like this one.', signY: 12.6 });
     // ---- PROCESSIONAL COLONNADE along the main axis ----
@@ -1619,7 +1751,10 @@ export function buildWorld(THREE, scene, level) {
   }
 
   H.bounds = P.bounds || 24;
+  if (Q.grassHalf && SC.grass.length > 4) SC.grass.length = Math.ceil(SC.grass.length / 2);
   buildScatter(); // bake all instanced scatter (visual only, no colliders)
+  buildTreeInstances(); // 2 draws for every tree
+  buildStatic(); // merge all box()/cyl() statics per material
 
   // Shadow frustum hugs the real playable bounds (not a fixed guess):
   // tighter texel density + bias tuned once here for every level.
@@ -1702,6 +1837,7 @@ export function buildWorld(THREE, scene, level) {
   for (let i = 0; i < N; i++) { pos[i * 3] = (R() - 0.5) * 50; pos[i * 3 + 1] = 0.5 + R() * 5; pos[i * 3 + 2] = (R() - 0.5) * 50; }
   pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const pts = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0xffe9a8, size: 0.18, transparent: true, opacity: 0.8 }));
+  pts.visible = Q.fxOn; // hidden on LOW quality
   scene.add(pts);
   H.dynamics.push((dt, t) => { pts.rotation.y += dt * 0.02; pts.position.y = Math.sin(t * 0.7) * 0.3; });
 

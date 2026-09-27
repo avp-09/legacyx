@@ -382,11 +382,28 @@ export class Game {
         if (Math.abs(this.joy.x) > 0.75 || Math.abs(this.joy.y) > 0.75) inp.run = true;
       }
       this.player.update(dt, inp, this.camYaw, this.world.colliders, this.world.bounds);
-      // camera follow
+      // camera follow (+ SLICE 3: pull-in so big walls don't swallow the view)
       const p = this.player.group.position;
-      const cx = p.x + Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-      const cz = p.z + Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
-      const cy = p.y + 1.6 + Math.sin(this.camPitch) * this.camDist;
+      let cx = p.x + Math.sin(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
+      let cz = p.z + Math.cos(this.camYaw) * Math.cos(this.camPitch) * this.camDist;
+      let cy = p.y + 1.6 + Math.sin(this.camPitch) * this.camDist;
+      if (cy < 1.0) cy = 1.0;
+      if (this.world.colliders) {
+        const hx = p.x, hy = p.y + 1.7, hz = p.z;
+        let dx = cx - hx, dy = cy - hy, dz = cz - hz;
+        const len = Math.hypot(dx, dy, dz) || 0.001;
+        dx /= len; dy /= len; dz /= len;
+        let best = len;
+        for (const c of this.world.colliders) {
+          if (c.r < 1.4) continue; // buildings/walls/towers only, not props/NPCs
+          const ox = c.x - hx, oz = c.z - hz;
+          const t = ox * dx + oz * dz;
+          if (t < 1 || t > len) continue;
+          const perp = Math.hypot(ox - dx * t, oz - dz * t);
+          if (perp < c.r + 0.45 && hy + dy * t < 5 && t - 0.7 < best) best = Math.max(1.2, t - 0.7);
+        }
+        if (best < len) { cx = hx + dx * best; cy = hy + dy * best; cz = hz + dz * best; if (cy < 1.0) cy = 1.0; }
+      }
       this.camera.position.lerp(new THREE.Vector3(cx, cy, cz), Math.min(1, dt * 8));
       this.camera.lookAt(p.x, p.y + 1.5, p.z);
       // kalam follows
@@ -896,8 +913,11 @@ export class Game {
 
   applySettings() {
     const s = Save.data.settings;
+    if (!['high', 'medium', 'low'].includes(s.quality)) s.quality = 'high';
     AudioSys.setEnabled(s.music, s.sfx);
-    this.renderer.setPixelRatio(s.quality === 'low' ? 1 : Math.min(window.devicePixelRatio, 2));
+    // HIGH: full detail · MEDIUM: balanced · LOW: aggressive (also tighter on touch)
+    this.renderer.setPixelRatio(
+      s.quality === 'low' ? 1 : s.quality === 'medium' ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = s.quality !== 'low';
     document.getElementById('set-music').checked = s.music;
     document.getElementById('set-sfx').checked = s.sfx;
