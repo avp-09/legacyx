@@ -15,8 +15,186 @@ export function buildWorld(THREE, scene, level) {
     gate: null, seal: null, portal: null
   };
 
+  // ============ VISUAL SYSTEMS: material cache, canvas textures, glow, sky ============
+  // All shared/cached — identical property sets reuse one GPU program/material.
+  const matCache = new Map();
+  function hex(v, fb = 0xffffff) {
+    if (v === undefined || v === null) return fb;
+    if (typeof v === 'number') return v;
+    if (v && typeof v.getHex === 'function') return v.getHex();
+    return fb;
+  }
+  // getMaterial({color, roughness, metalness, emissive, emissiveIntensity,
+  //   transparent, opacity, map, flatShading, side, depthWrite, basic})
+  // NOTE: never route through here a material you mutate per-frame
+  // (gate bar, portal disc, collectible core, glow rings) — those stay unique.
+  function getMaterial(o = {}) {
+    const key = [
+      hex(o.color).toString(16), (+(o.roughness ?? 0.85)).toFixed(2), (+(o.metalness ?? 0)).toFixed(2),
+      hex(o.emissive, 0).toString(16), (+(o.emissiveIntensity ?? 1)).toFixed(2),
+      o.transparent ? 1 : 0, (+(o.opacity ?? 1)).toFixed(3), (o.map && o.map.key) || '', o.flatShading ? 1 : 0,
+      o.side ?? 0, o.depthWrite === false ? 0 : 1, o.basic ? 1 : 0
+    ].join('|');
+    let m = matCache.get(key);
+    if (!m) {
+      const params = {
+        color: hex(o.color),
+        roughness: o.roughness ?? 0.85,
+        metalness: o.metalness ?? 0,
+        side: o.side ?? 0
+      };
+      if (o.emissive !== undefined) { params.emissive = hex(o.emissive, 0); params.emissiveIntensity = o.emissiveIntensity ?? 1; }
+      if (o.transparent) { params.transparent = true; params.opacity = o.opacity ?? 1; }
+      if (o.map) params.map = o.map.tex;
+      if (o.flatShading) params.flatShading = true;
+      if (o.depthWrite === false) params.depthWrite = false;
+      m = o.basic
+        ? new THREE.MeshBasicMaterial(params)
+        : new THREE.MeshStandardMaterial(params);
+      matCache.set(key, m);
+    }
+    return m;
+  }
+
+  // ---- procedural canvas textures (tiny, cached, zero downloads) ----
+  const texCache = new Map();
+  function lcg(seed) { let s = seed >>> 0; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; }
+  function makeTex(id, size, painter, rx = 1, ry = 1) {
+    const key = `${id}|${rx}x${ry}`;
+    let t = texCache.get(key);
+    if (!t) {
+      const cv = document.createElement('canvas'); cv.width = cv.height = size;
+      painter(cv.getContext('2d'), size, lcg(id.length * 7919 + size * 131 + rx * 17 + ry * 31));
+      const tex = new THREE.CanvasTexture(cv);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(rx, ry);
+      tex.anisotropy = 4;
+      t = { tex, key };
+      texCache.set(key, t);
+    }
+    return t;
+  }
+  function speckle(g, size, rnd, n, colors, aMin, aMax, sMin, sMax) {
+    for (let i = 0; i < n; i++) {
+      g.globalAlpha = aMin + rnd() * (aMax - aMin);
+      g.fillStyle = colors[(rnd() * colors.length) | 0];
+      const s = sMin + rnd() * (sMax - sMin);
+      g.fillRect(rnd() * size, rnd() * size, s, s);
+    }
+    g.globalAlpha = 1;
+  }
+  function T_brick(base, mortar, rx = 2, ry = 2) {
+    return makeTex(`brick${base}${mortar}`, 128, (g, S, rnd) => {
+      g.fillStyle = mortar; g.fillRect(0, 0, S, S);
+      const bh = S / 8, bw = S / 4;
+      for (let r = 0; r < 8; r++) {
+        const off = (r % 2) * bw / 2;
+        for (let cx = -1; cx < 5; cx++) {
+          const shade = 0.9 + rnd() * 0.2;
+          g.fillStyle = '#' + new THREE.Color(base).multiplyScalar(shade).getHexString();
+          g.fillRect(cx * bw + off + 1, r * bh + 1, bw - 2, bh - 2);
+        }
+      }
+      speckle(g, S, rnd, 260, ['#000000', '#ffffff'], 0.03, 0.09, 1, 2.5);
+    }, rx, ry);
+  }
+  function T_stone(base, rx = 2, ry = 2) {
+    return makeTex(`stone${base}`, 128, (g, S, rnd) => {
+      g.fillStyle = base; g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 26; i++) { // soft mineral blotches
+        g.globalAlpha = 0.05 + rnd() * 0.07;
+        g.fillStyle = rnd() > 0.5 ? '#ffffff' : '#3a2f22';
+        g.beginPath(); g.arc(rnd() * S, rnd() * S, 6 + rnd() * 18, 0, 7); g.fill();
+      }
+      g.globalAlpha = 1;
+      speckle(g, S, rnd, 320, ['#000000', '#ffffff'], 0.03, 0.08, 1, 2);
+    }, rx, ry);
+  }
+  function T_ground(base, rx = 10, ry = 10) {
+    return makeTex(`ground${base}`, 256, (g, S, rnd) => {
+      g.fillStyle = base; g.fillRect(0, 0, S, S);
+      speckle(g, S, rnd, 1400, ['#000000', '#ffffff', base], 0.03, 0.1, 1, 3);
+      for (let i = 0; i < 40; i++) { // pebbles
+        g.globalAlpha = 0.25 + rnd() * 0.3;
+        g.fillStyle = rnd() > 0.5 ? '#ffffff' : '#4a3d2c';
+        g.beginPath(); g.arc(rnd() * S, rnd() * S, 1 + rnd() * 2.2, 0, 7); g.fill();
+      }
+      g.globalAlpha = 1;
+    }, rx, ry);
+  }
+  function T_wood(base, rx = 1, ry = 1) {
+    return makeTex(`wood${base}`, 128, (g, S, rnd) => {
+      g.fillStyle = base; g.fillRect(0, 0, S, S);
+      for (let x = 0; x < S; x += 3) { // grain
+        g.globalAlpha = 0.08 + rnd() * 0.12;
+        g.fillStyle = rnd() > 0.4 ? '#2e1f10' : '#d9b98a';
+        g.fillRect(x, 0, 1 + rnd() * 2, S);
+      }
+      g.globalAlpha = 1;
+    }, rx, ry);
+  }
+  function T_plaster(base, rx = 2, ry = 2) {
+    return makeTex(`plaster${base}`, 128, (g, S, rnd) => {
+      g.fillStyle = base; g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 18; i++) {
+        g.globalAlpha = 0.04 + rnd() * 0.06;
+        g.fillStyle = rnd() > 0.5 ? '#ffffff' : '#8a7452';
+        g.beginPath(); g.arc(rnd() * S, rnd() * S, 8 + rnd() * 22, 0, 7); g.fill();
+      }
+      g.globalAlpha = 1;
+      speckle(g, S, rnd, 200, ['#000000'], 0.02, 0.06, 1, 2);
+    }, rx, ry);
+  }
+
+  // ---- reusable additive glow sprites (replace per-object PointLights) ----
+  const glowTexCache = new Map();
+  function glowTexture(color) {
+    const key = (color | 0).toString(16);
+    let t = glowTexCache.get(key);
+    if (!t) {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+      const g = cv.getContext('2d');
+      const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.25, '#' + new THREE.Color(color).getHexString());
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+      t = new THREE.CanvasTexture(cv);
+      glowTexCache.set(key, t);
+    }
+    return t;
+  }
+  function addGlow(x, y, z, color, s = 2.2, opacity = 0.55) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture(color), transparent: true, opacity,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    sp.scale.set(s, s, 1); sp.position.set(x, y, z);
+    scene.add(sp);
+    return sp;
+  }
+
+  // ---- gradient sky dome (per-era tones, no flat background) ----
+  function buildSky() {
+    const top = '#' + new THREE.Color(level.sky).multiplyScalar(0.42).getHexString();
+    const mid = '#' + new THREE.Color(level.sky).getHexString();
+    const hor = '#' + new THREE.Color(level.sky).lerp(new THREE.Color(0xfff6e0), 0.45).getHexString();
+    const cv = document.createElement('canvas'); cv.width = 4; cv.height = 256;
+    const g = cv.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, top); grad.addColorStop(0.55, mid); grad.addColorStop(0.8, hor); grad.addColorStop(1, hor);
+    g.fillStyle = grad; g.fillRect(0, 0, 4, 256);
+    const tex = new THREE.CanvasTexture(cv);
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(240, 20, 14),
+      getMaterial({ color: 0xffffff, map: { tex, key: `sky${level.id}` }, side: 2, depthWrite: false, basic: true })
+    );
+    dome.material.fog = false;
+    scene.add(dome);
+  }
+
   // ---------- atmosphere ----------
-  scene.background = new THREE.Color(level.sky);
+  buildSky();
   scene.fog = new THREE.Fog(level.fog, 34, 125);
   const hemi = new THREE.HemisphereLight(0xffffff, level.ground, 0.85);
   scene.add(hemi);
@@ -30,28 +208,28 @@ export function buildWorld(THREE, scene, level) {
   H.dynamics.push(() => {});
 
   // ---------- ground ----------
-  const groundMat = new THREE.MeshStandardMaterial({ color: level.ground, roughness: 1 });
+  const groundMat = getMaterial({ color: 0xffffff, roughness: 1, map: T_ground('#' + level.ground.toString(16).padStart(6, '0')) });
   const ground = new THREE.Mesh(new THREE.CircleGeometry(78, 40), groundMat);
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   scene.add(ground);
   // plaza disc
   const plaza = new THREE.Mesh(new THREE.CircleGeometry(7, 28),
-    new THREE.MeshStandardMaterial({ color: 0xf5e6c4, roughness: 0.9 }));
+    getMaterial({ color: 0xf5e6c4, roughness: 0.9 }));
   plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.01; plaza.receiveShadow = true;
   scene.add(plaza);
 
-  const box = (w, h, d, color, x, z, y = 0, ry = 0, collide = 0) => {
+  const box = (w, h, d, color, x, z, y = 0, ry = 0, collide = 0, tex = null) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
+      tex ? getMaterial({ color: 0xffffff, roughness: 0.92, map: tex }) : getMaterial({ color, roughness: 0.85 }));
     m.position.set(x, y + h / 2, z); m.rotation.y = ry;
     m.castShadow = true; m.receiveShadow = true;
     scene.add(m);
     if (collide) H.colliders.push({ x, z, r: collide });
     return m;
   };
-  const cyl = (rt, rb, h, color, x, z, y = 0, seg = 12) => {
+  const cyl = (rt, rb, h, color, x, z, y = 0, seg = 12, tex = null) => {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
+      tex ? getMaterial({ color: 0xffffff, roughness: 0.9, map: tex }) : getMaterial({ color, roughness: 0.8 }));
     m.position.set(x, y + h / 2, z); m.castShadow = true;
     scene.add(m); return m;
   };
@@ -60,13 +238,13 @@ export function buildWorld(THREE, scene, level) {
   for (let i = 0; i < 7; i++) {
     const a = (i / 7) * Math.PI * 2;
     const hill = new THREE.Mesh(new THREE.ConeGeometry(10 + R() * 8, 9 + R() * 7, 7),
-      new THREE.MeshStandardMaterial({ color: new THREE.Color(level.ground).multiplyScalar(0.72), roughness: 1 }));
+      getMaterial({ color: new THREE.Color(level.ground).multiplyScalar(0.72), roughness: 1 }));
     hill.position.set(Math.cos(a) * 66, 0, Math.sin(a) * 66);
     scene.add(hill);
   }
   for (let i = 0; i < 6; i++) {
     const cl = new THREE.Mesh(new THREE.SphereGeometry(2 + R() * 2, 10, 8),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.85 }));
+      getMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.85 }));
     cl.position.set((R() - 0.5) * 80, 30 + R() * 10, (R() - 0.5) * 80);
     cl.scale.x = 1.8; scene.add(cl); H.clouds.push(cl);
     const sp = 0.2 + R() * 0.4;
@@ -76,21 +254,21 @@ export function buildWorld(THREE, scene, level) {
   // ---------- shared props ----------
   const LEAF = [0x3e8e4f, 0x4da35a, 0x2f7a3e, 0x6fae4e];
   function tree(x, z, s = 1) {
-    cyl(0.22 * s, 0.34 * s, 1.7 * s, 0x6b4423, x, z);
+    cyl(0.22 * s, 0.34 * s, 1.7 * s, 0xffffff, x, z, 0, 12, T_wood('#6b4423'));
     // layered canopy — three blobs so it reads as a real tree, not a lollipop
     const blobs = [
       [0, 2.5, 0, 1.35], [0.75, 2.0, 0.3, 0.9], [-0.7, 2.05, -0.35, 0.95], [0.1, 3.15, -0.1, 0.8]
     ];
     blobs.forEach(([ox, oy, oz, r], i) => {
       const c = new THREE.Mesh(new THREE.SphereGeometry(r * s, 12, 10),
-        new THREE.MeshStandardMaterial({ color: LEAF[(i + (x > 0 ? 1 : 0)) % LEAF.length], roughness: 0.95, flatShading: true }));
+        getMaterial({ color: LEAF[(i + (x > 0 ? 1 : 0)) % LEAF.length], roughness: 0.95, flatShading: true }));
       c.position.set(x + ox * s, oy * s, z + oz * s);
       c.castShadow = true; scene.add(c);
     });
     if (s > 1.7) { // banyan: hanging aerial roots + wide shade
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
-        cyl(0.09, 0.12, 2.2 * s, 0x7a5a35, x + Math.cos(a) * 1.5 * s, z + Math.sin(a) * 1.5 * s, 0.4);
+        cyl(0.09, 0.12, 2.2 * s, 0xffffff, x + Math.cos(a) * 1.5 * s, z + Math.sin(a) * 1.5 * s, 0.4, 8, T_wood('#7a5a35'));
       }
     }
     H.colliders.push({ x, z, r: 0.6 * s });
@@ -98,7 +276,7 @@ export function buildWorld(THREE, scene, level) {
   function banner(x, z, color) {
     cyl(0.06, 0.06, 4, 0x4a3220, x, z);
     const f = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.8),
-      new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.7 }));
+      getMaterial({ color, side: 2, roughness: 0.7 }));
     f.position.set(x + 0.75, 3.4, z); scene.add(f);
     H.dynamics.push((dt, t) => { f.rotation.y = Math.sin(t * 2 + x) * 0.35; });
   }
@@ -106,19 +284,19 @@ export function buildWorld(THREE, scene, level) {
     const cosr = Math.cos(ry), sinr = Math.sin(ry);
     const L = (lx, lz) => [x + lx * cosr - lz * sinr, z + lx * sinr + lz * cosr];
     // counter + goods on top (fruit, grain, pots)
-    box(2.4, 0.9, 1.4, 0x8a5a2b, x, z, 0, ry, 1.6);
+    box(2.4, 0.9, 1.4, 0xffffff, x, z, 0, ry, 1.6, T_wood('#8a5a2b'));
     const goods = [0xd94f3d, 0xe8a13c, 0x7ab648, 0xb5542d];
     goods.forEach((g, i) => {
       const [gx, gz] = L(-0.8 + i * 0.55, 0.1);
       const m = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8),
-        new THREE.MeshStandardMaterial({ color: g, roughness: 0.6 }));
+        getMaterial({ color: g, roughness: 0.6 }));
       m.position.set(gx, 1.05, gz); m.castShadow = true; scene.add(m);
     });
     // striped awning: alternating slats
     for (let i = 0; i < 6; i++) {
       const [sx, sz] = L(-1.25 + i * 0.5, 0);
       const slat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 2.0),
-        new THREE.MeshStandardMaterial({ color: i % 2 ? 0xfff6e2 : awn, roughness: 0.7 }));
+        getMaterial({ color: i % 2 ? 0xfff6e2 : awn, roughness: 0.7 }));
       slat.position.set(sx, 1.95, sz); slat.rotation.y = ry; slat.castShadow = true; scene.add(slat);
     }
     for (const px of [-1.3, 1.3]) for (const pz of [-0.85, 0.85]) {
@@ -132,18 +310,18 @@ export function buildWorld(THREE, scene, level) {
   }
   function pot(x, z, color = 0xb5542d, s = 1) {
     const p = new THREE.Mesh(new THREE.SphereGeometry(0.4 * s, 12, 10),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.6 }));
+      getMaterial({ color, roughness: 0.6 }));
     p.position.set(x, 0.32 * s, z); p.scale.y = 1.15; p.castShadow = true; scene.add(p);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.22 * s, 0.07 * s, 8, 14),
-      new THREE.MeshStandardMaterial({ color: 0x7a3a1e, roughness: 0.6 }));
+      getMaterial({ color: 0x7a3a1e, roughness: 0.6 }));
     rim.rotation.x = Math.PI / 2; rim.position.set(x, 0.72 * s, z); scene.add(rim);
   }
   function torch(x, z) {
     cyl(0.07, 0.09, 1.6, 0x3a2a1a, x, z);
     const fl = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8),
-      new THREE.MeshStandardMaterial({ color: 0xffb13c, emissive: 0xff7a00, emissiveIntensity: 2 }));
+      getMaterial({ color: 0xffb13c, emissive: 0xff7a00, emissiveIntensity: 2 }));
     fl.position.set(x, 1.8, z); scene.add(fl);
-    const li = new THREE.PointLight(0xff9a2e, 6, 9); li.position.set(x, 2, z); scene.add(li);
+    addGlow(x, 2, z, 0xff9a2e, 2.4, 0.5); // sprite glow, no PointLight
     H.dynamics.push((dt, t) => { fl.scale.setScalar(1 + Math.sin(t * 9 + x * 3) * 0.18); });
   }
   function glowRing(x, z, color = 0x35e0ff, y = 0.05) {
@@ -167,13 +345,13 @@ export function buildWorld(THREE, scene, level) {
   function npcMesh(color, icon) {
     const grp = new THREE.Group();
     const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 1.3, 12),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
+      getMaterial({ color, roughness: 0.8 }));
     robe.position.y = 0.65; robe.castShadow = true; grp.add(robe);
     const hd = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 12),
-      new THREE.MeshStandardMaterial({ color: 0xb5773f, roughness: 0.7 }));
+      getMaterial({ color: 0xb5773f, roughness: 0.7 }));
     hd.position.y = 1.5; hd.castShadow = true; grp.add(hd);
     const cap = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }));
+      getMaterial({ color: 0xffffff, roughness: 0.7 }));
     cap.position.y = 1.55; grp.add(cap);
     if (icon) {
     // floating icon sprite via canvas
@@ -192,7 +370,7 @@ export function buildWorld(THREE, scene, level) {
   // Bullock cart: bed, big spoked wheels, draft pole, hay load.
   function cart(x, z, ry = 0) {
     const grp = new THREE.Group(); grp.position.set(x, 0, z); grp.rotation.y = ry;
-    const wood = new THREE.MeshStandardMaterial({ color: 0x7a5228, roughness: 0.85 });
+    const wood = getMaterial({ color: 0x7a5228, roughness: 0.85, map: T_wood('#7a5228') });
     const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, 1.3), wood);
     bed.position.y = 1.0; bed.castShadow = true; grp.add(bed);
     [-0.85, 0.85].forEach(px => [-0.75, 0.75].forEach(pz => {
@@ -203,13 +381,13 @@ export function buildWorld(THREE, scene, level) {
       const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.14, 12), wood);
       wheel.rotation.x = Math.PI / 2; wheel.position.set(0, 0.6, pz); wheel.castShadow = true; grp.add(wheel);
       const hub = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0x4a3220 }));
+        getMaterial({ color: 0x4a3220, roughness: 0.85 }));
       hub.position.set(0, 0.6, pz + (pz > 0 ? 0.1 : -0.1)); grp.add(hub);
     });
     const pole = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 2.4), wood);
     pole.position.set(0, 0.85, 1.9); pole.rotation.x = 0.12; grp.add(pole);
     const hay = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 1.0),
-      new THREE.MeshStandardMaterial({ color: 0xd9b64a, roughness: 1, flatShading: true }));
+      getMaterial({ color: 0xd9b64a, roughness: 1, flatShading: true }));
     hay.position.y = 1.5; hay.castShadow = true; grp.add(hay);
     scene.add(grp);
     H.colliders.push({ x, z, r: 1.6 });
@@ -241,7 +419,7 @@ export function buildWorld(THREE, scene, level) {
     const dx = x2 - x1, dz = z2 - z1, len = Math.hypot(dx, dz);
     const horiz = Math.abs(dx) >= Math.abs(dz);
     const s = new THREE.Mesh(new THREE.PlaneGeometry(horiz ? len : w, horiz ? w : len),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.95 }));
+      getMaterial({ color, roughness: 0.95 }));
     s.rotation.x = -Math.PI / 2; s.position.set((x1 + x2) / 2, 0.02, (z1 + z2) / 2);
     s.receiveShadow = true; scene.add(s);
   }
@@ -249,35 +427,39 @@ export function buildWorld(THREE, scene, level) {
     const dx = x2 - x1, dz = z2 - z1, len = Math.hypot(dx, dz);
     const horiz = Math.abs(dx) >= Math.abs(dz);
     const n = Math.max(1, Math.round(len / 4));
+    const wallTex = T_stone('#' + color.toString(16).padStart(6, '0'));
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
-      box(horiz ? len / n + 0.4 : 1.6, h, horiz ? 1.6 : len / n + 0.4, color, x1 + dx * t, z1 + dz * t, 0);
+      box(horiz ? len / n + 0.4 : 1.6, h, horiz ? 1.6 : len / n + 0.4, 0xffffff, x1 + dx * t, z1 + dz * t, 0, 0, 0, wallTex);
       const cap = new THREE.Mesh(new THREE.BoxGeometry(horiz ? len / n + 0.5 : 1.9, 0.3, horiz ? 1.9 : len / n + 0.5),
-        new THREE.MeshStandardMaterial({ color: 0x8a5a35, roughness: 0.85 }));
+        getMaterial({ color: 0xffffff, roughness: 0.85, map: T_wood('#8a5a35') }));
       cap.position.set(x1 + dx * t, h + 0.15, z1 + dz * t); cap.castShadow = true; scene.add(cap);
     }
     const m = Math.max(2, Math.round(len / 3));
     for (let i = 0; i <= m; i++) { const t = i / m; H.colliders.push({ x: x1 + dx * t, z: z1 + dz * t, r: 2 }); }
   }
   function wallTower(x, z, r = 2.2, h = 6, color = 0xa5763e) {
-    cyl(r * 0.9, r, h, color, x, z);
+    cyl(r * 0.9, r, h, 0xffffff, x, z, 0, 12, T_stone('#' + color.toString(16).padStart(6, '0')));
     const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 0.85, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0xe8d8a8, roughness: 0.6 }));
+      getMaterial({ color: 0xffffff, roughness: 0.6, map: T_plaster('#e8d8a8', '#cfc09a') }));
     dome.position.set(x, h, z); dome.castShadow = true; scene.add(dome);
     H.colliders.push({ x, z, r: r + 0.3 });
   }
   function houseV(x, z, o = {}) {
     const w = o.w || 4.5, h = o.h || 2.8, d = o.d || 4, ry = o.ry || 0, c = o.c !== undefined ? o.c : 0xb5763f;
-    box(w, h, d, c, x, z, 0, ry, o.r !== undefined ? o.r : 3);
+    const wtex = (c === 0xd9c49a || c === 0xd9b06a)
+      ? T_plaster('#d9c49a', '#b8a67e')
+      : T_brick('#' + c.toString(16).padStart(6, '0'), '#8a6a45');
+    box(w, h, d, 0xffffff, x, z, 0, ry, o.r !== undefined ? o.r : 3, wtex);
     const fx = Math.sin(ry), fz = Math.cos(ry);
     if (o.roof === 'pyr') {
       const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, h * 0.55, 4),
-        new THREE.MeshStandardMaterial({ color: o.trim || 0x8a5a2e, roughness: 0.9, flatShading: true }));
+        getMaterial({ color: 0xffffff, roughness: 0.9, map: T_wood('#8a5a2e'), flatShading: true }));
       roof.position.set(x, h + h * 0.27, z); roof.rotation.y = ry + Math.PI / 4; roof.castShadow = true; scene.add(roof);
-    } else box(w + 0.5, 0.35, d + 0.5, o.trim || 0x8a5a2e, x, z, h, ry);
+    } else box(w + 0.5, 0.35, d + 0.5, 0xffffff, x, z, h, ry, 0, T_wood('#8a5a2e'));
     box(1.1, 1.7, 0.2, 0x3a2412, x + fx * (d / 2 + 0.03), z + fz * (d / 2 + 0.03), 0, ry); // door
     const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.1),
-      new THREE.MeshStandardMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.3 }));
+      getMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.3 }));
     win.position.set(x - fz * 1.3 + fx * 0.2, 1.6, z + fx * 1.3 + fz * 0.2);
     win.rotation.y = ry; scene.add(win);
   }
@@ -304,10 +486,10 @@ export function buildWorld(THREE, scene, level) {
     }
     core.position.y = 1.0; core.castShadow = true; grp.add(core);
     const halo = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 8, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+      getMaterial({ color: 0xffe066, basic: true }));
     halo.position.y = 1.0; grp.add(halo);
-    const li = new THREE.PointLight(COLLECT_COLORS[level.id] || 0xffd23e, 5, 7);
-    li.position.y = 1.2; grp.add(li);
+    const gl = addGlow(0, 1.2, 0, COLLECT_COLORS[level.id] || 0xffd23e, 2.6, 0.5);
+    grp.add(gl); gl.position.set(0, 1.2, 0); // rides with the collectible group
     H.dynamics.push((dt, t) => { halo.rotation.y += dt * 2; halo.rotation.x = Math.sin(t * 2) * 0.4; });
     floaty(core, 1.0);
     grp.userData.halo = halo; grp.userData.core = core; // quest dimming hooks
@@ -411,46 +593,46 @@ export function buildWorld(THREE, scene, level) {
     houses.forEach(([x, z], i) => {
       const c = i % 2 ? brick : brick2;
       const h = 2.6 + (i % 3) * 0.5, ry = (i % 2) * 0.15;
-      box(4.5, h, 4, c, x, z, 0, ry, 3);
-      box(5, 0.35, 4.5, 0x8a5a2e, x, z, h);                       // roof slab
+      box(4.5, h, 4, 0xffffff, x, z, 0, ry, 3, T_brick(c === brick ? '#b5763f' : '#a56635', '#8a6a45'));
+      box(5, 0.35, 4.5, 0xffffff, x, z, h, 0, 0, T_wood('#8a5a2e'));
       box(1.1, 1.7, 0.2, 0x3a2412, x, z + 2.05, 0);               // door
       box(1.5, 0.25, 0.25, 0x6b4423, x, z + 2.05, 1.7);           // lintel
       [-1.3, 1.3].forEach(wx => {                                 // windows with warm light
         const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.1),
-          new THREE.MeshStandardMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.35 }));
+          getMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.35 }));
         win.position.set(x + wx, 1.6, z + 2.02); scene.add(win);
       });
     });
     // GREAT BATH — stepped sunken pool with columns, instantly readable
-    box(8.6, 0.5, 6.6, 0x9a6a38, -2, -8, 0, 0, 0);                // rim platform
+    box(8.6, 0.5, 6.6, 0xffffff, -2, -8, 0, 0, 0, T_stone('#9a6a38', '#7d5630')); // rim platform
     const bathWater = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.5, 3.8),
-      new THREE.MeshStandardMaterial({ color: 0x2ea8d4, roughness: 0.1, metalness: 0.25, emissive: 0x0a4a66, emissiveIntensity: 0.35 }));
+      getMaterial({ color: 0x2ea8d4, roughness: 0.1, metalness: 0.25, emissive: 0x0a4a66, emissiveIntensity: 0.35 }));
     bathWater.position.set(-2, 0.45, -8); scene.add(bathWater);
     H.dynamics.push((dt, t) => { bathWater.position.y = 0.45 + Math.sin(t * 1.6) * 0.04; });
     for (let s = 0; s < 3; s++)                                   // steps down (south side)
-      box(3.2 - s * 0.5, 0.28, 0.6, 0x7a5228, -2, -4.6 + s * 0.55, 0.35 - s * 0.12);
+      box(3.2 - s * 0.5, 0.28, 0.6, 0xffffff, -2, -4.6 + s * 0.55, 0.35 - s * 0.12, 0, 0, T_stone('#7a5228', '#614722'));
     [[-5.4, -10.6], [1.4, -10.6], [-5.4, -5.4], [1.4, -5.4]].forEach(([cx2, cz2]) => {
-      cyl(0.28, 0.34, 3.2, 0xc09a55, cx2, cz2);                   // colonnade
-      box(1, 0.3, 1, 0x8a6a35, cx2, cz2, 3.2);
+      cyl(0.28, 0.34, 3.2, 0xffffff, cx2, cz2, 0, 12, T_stone('#c09a55', '#9c7c48')); // colonnade
+      box(1, 0.3, 1, 0xffffff, cx2, cz2, 3.2, 0, 0, T_wood('#8a6a35'));
     });
     H.colliders.push({ x: -2, z: -8, r: 4.2 });
     addLandmark({ x: -2, z: -8, r: 5, icon: '🛁', title: 'THE GREAT BATH',
       fact: 'Mohenjo-daro had a watertight pool — probably used for ritual bathing 4,500 years ago!', signY: 5.2 });
     // GRANARY — raised pillared storehouse with grain sacks
     box(6.4, 0.7, 5.2, 0x8a6a45, -16, -14, 0, 0, 0);              // platform
-    box(5.2, 2.4, 4, 0xb5763f, -16, -14, 0.7, 0, 0);
+    box(5.2, 2.4, 4, 0xffffff, -16, -14, 0.7, 0, 0, T_brick('#b5763f', '#8a6a45'));
     box(5.8, 0.35, 4.6, 0x8a5a2e, -16, -14, 3.1);
     [-1.9, -0.6, 0.6, 1.9].forEach(px => cyl(0.22, 0.26, 2.4, 0xc09a55, -16 + px, -11.6, 0.7));
     [[-18, -11.5], [-17.2, -11.2], [-14.2, -11.4]].forEach(([sx, sz]) => {
       const sack = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 8),
-        new THREE.MeshStandardMaterial({ color: 0xd9b06a, roughness: 0.9 }));
+        getMaterial({ color: 0xd9b06a, roughness: 0.9 }));
       sack.position.set(sx, 0.4, sz); sack.scale.y = 0.75; sack.castShadow = true; scene.add(sack);
     });
     H.colliders.push({ x: -16, z: -14, r: 3.9 });
     addLandmark({ x: -16, z: -14, r: 5.2, icon: '🌾', title: 'THE GRANARY',
       fact: 'Great storehouses held grain for the whole city — feeding thousands!', signY: 5.2 });
     // WELL — stone ring with posts, beam, rope and bucket
-    cyl(1.1, 1.25, 1.2, 0x7a5a3a, 10, 2);
+    cyl(1.1, 1.25, 1.2, 0xffffff, 10, 2, 0, 12, T_stone('#7a5a3a', '#5a4632'));
     cyl(0.85, 0.85, 1.25, 0x1a2a3a, 10, 2);                       // dark shaft
     [9.1, 10.9].forEach(px => cyl(0.09, 0.09, 2.4, 0x4a3220, px, 2));
     box(2.2, 0.15, 0.15, 0x4a3220, 10, 2, 2.3);
@@ -461,7 +643,7 @@ export function buildWorld(THREE, scene, level) {
     // drainage channels (glowing blue lines)
     [[-10, 0, 12], [2, 6, 10], [-4, -14, 14]].forEach(([x, z, len]) => {
       const ch = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.5),
-        new THREE.MeshStandardMaterial({ color: 0x35b6d9, emissive: 0x1e7fa8, emissiveIntensity: 0.7 }));
+        getMaterial({ color: 0x35b6d9, emissive: 0x1e7fa8, emissiveIntensity: 0.7 }));
       ch.position.set(x, 0.06, z); scene.add(ch);
     });
     stall(-6, 4, 0xd94f3d); stall(-9, 4, 0x3d7bd9, 0.2); stall(-7.5, 7, 0x3d8a4f, -0.15);
@@ -478,11 +660,11 @@ export function buildWorld(THREE, scene, level) {
     // ---- SOUTH HOMES — second residential quarter, varied sizes ----
     [[-16, 22, 2.6], [-10, 24, 3.4], [-4, 22, 2.9], [2, 26, 2.5]].forEach(([x, z, h], i) => {
       const c = i % 2 ? brick2 : brick;
-      box(4.5, h, 4, c, x, z, 0, (i % 2) * -0.12, 3);
-      box(5, 0.35, 4.5, 0x8a5a2e, x, z, h);
+      box(4.5, h, 4, 0xffffff, x, z, 0, (i % 2) * -0.12, 3, T_brick(c === brick ? '#b5763f' : '#a56635', '#8a6a45'));
+      box(5, 0.35, 4.5, 0xffffff, x, z, h, 0, 0, T_wood('#8a5a2e'));
       box(1.1, 1.7, 0.2, 0x3a2412, x + 1, z - 2.05, 0);
       const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.1),
-        new THREE.MeshStandardMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.3 }));
+        getMaterial({ color: 0x2e1c0c, emissive: 0xffb13c, emissiveIntensity: 0.3 }));
       win.position.set(x - 1.2, 1.6, z - 2.02); scene.add(win);
     });
     pot(-13, 23); pot(-7, 25); banner(-1, 24, 0x3d8a4f);
@@ -493,18 +675,18 @@ export function buildWorld(THREE, scene, level) {
       box(8, 0.12, 1.1, 0x6b4a26, -26.5, -18 + rz * 2, 0);
       for (let rx = 0; rx < 6; rx++) {
         const crop = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.8, 7),
-          new THREE.MeshStandardMaterial({ color: rx % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
+          getMaterial({ color: rx % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
         crop.position.set(-30 + rx * 1.4, 0.5, -18 + rz * 2); crop.castShadow = true; scene.add(crop);
       }
     }
     box(3.5, 2.6, 3, brick2, -26, -4, 0, 0.1, 2.2);                    // farm hut
     const hutRoof = new THREE.Mesh(new THREE.ConeGeometry(3, 1.6, 4),
-      new THREE.MeshStandardMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
+      getMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
     hutRoof.position.set(-26, 3.4, -4); hutRoof.rotation.y = Math.PI / 4; hutRoof.castShadow = true; scene.add(hutRoof);
     cyl(0.09, 0.11, 2.2, 0x4a3220, -24, -14);                          // scarecrow
     box(1.1, 0.12, 0.12, 0x4a3220, -24, -13.2, 0);
     const scHead = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8),
-      new THREE.MeshStandardMaterial({ color: 0xd9b06a, roughness: 0.9 }));
+      getMaterial({ color: 0xd9b06a, roughness: 0.9 }));
     scHead.position.set(-24, 2.35, -14); scene.add(scHead);
     box(1.6, 0.5, 0.7, 0x7a5228, -27, -9, 0);                          // trough
     cart(-22, -14, -0.5);
@@ -514,16 +696,16 @@ export function buildWorld(THREE, scene, level) {
     [[26, -4], [26, 4]].forEach(([sx, sz]) => {
       [[-1.5, -1], [1.5, -1], [-1.5, 1], [1.5, 1]].forEach(([ox, oz]) =>
         cyl(0.12, 0.14, 2.2, 0x4a3220, sx + ox, sz + oz));
-      box(4.2, 0.25, 3.2, 0x8a5a2e, sx, sz, 2.2);
+      box(4.2, 0.25, 3.2, 0xffffff, sx, sz, 2.2, 0, 0, T_wood('#8a5a2e'));
       box(1.6, 0.8, 1, 0x9a6a35, sx, sz, 0, 0.2, 1.2);                  // worktable
       box(0.6, 0.6, 0.6, 0x7a5228, sx + 1.4, sz + 0.6, 0, -0.2);
     });
     const kiln = new THREE.Mesh(new THREE.SphereGeometry(1.7, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x8a4a2e, roughness: 0.9 }));
+      getMaterial({ color: 0x8a4a2e, roughness: 0.9 }));
     kiln.position.set(28, 0, -10); kiln.castShadow = true; scene.add(kiln);
     cyl(0.3, 0.38, 2.2, 0x6b3a22, 28, -10, 1.2);
     const kilnFire = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8),
-      new THREE.MeshStandardMaterial({ color: 0xff7a00, emissive: 0xff5500, emissiveIntensity: 2.5 }));
+      getMaterial({ color: 0xff7a00, emissive: 0xff5500, emissiveIntensity: 2.5 }));
     kilnFire.position.set(28, 0.5, -8.2); scene.add(kilnFire);
     H.colliders.push({ x: 28, z: -10, r: 1.9 });
     addLandmark({ x: 26, z: 0, r: 4.5, icon: '🧱', title: 'BRICK WORKSHOPS',
@@ -556,8 +738,8 @@ export function buildWorld(THREE, scene, level) {
     [[26, -4], [26, 4]].forEach(([sx, sz]) => {
       [[-1.5, -1], [1.5, -1], [-1.5, 1], [1.5, 1]].forEach(([ox, oz]) =>
         cyl(0.12, 0.14, 2.2, 0x4a3220, sx + ox, sz + oz));
-      box(4.2, 0.25, 3.2, 0x8a5a2e, sx, sz, 2.2);
-      box(1.6, 0.8, 1, 0x9a6a35, sx, sz, 0, 0.2, 1.2);
+      box(4.2, 0.25, 3.2, 0xffffff, sx, sz, 2.2, 0, 0, T_wood('#8a5a2e'));
+      box(1.6, 0.8, 1, 0xffffff, sx, sz, 0, 0.2, 1.2, T_wood('#9a6a35'));
       box(0.6, 0.6, 0.6, 0x7a5228, sx + 1.4, sz + 0.6, 0, -0.2);
     });
     pot(13, -16, 0xb5542d, 1.5); pot(19, -12, 0xb5542d, 1.4); pot(14, -11, 0x8a5a35, 1.3);
@@ -577,7 +759,7 @@ export function buildWorld(THREE, scene, level) {
       box(3.4, 0.12, 1, 0x6b4a26, fx, fz, 0);
       for (let k = 0; k < 4; k++) {
         const crop = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 7),
-          new THREE.MeshStandardMaterial({ color: k % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
+          getMaterial({ color: k % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
         crop.position.set(fx - 1.2 + k * 0.8, 0.45, fz); crop.castShadow = true; scene.add(crop);
       }
     });
@@ -587,7 +769,7 @@ export function buildWorld(THREE, scene, level) {
       box(3.4, 0.12, 1, 0x6b4a26, fx, fz, 0);
       for (let k = 0; k < 4; k++) {
         const crop2 = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 7),
-          new THREE.MeshStandardMaterial({ color: k % 2 ? 0xd9b64a : 0x7ab648, roughness: 0.9, flatShading: true }));
+          getMaterial({ color: k % 2 ? 0xd9b64a : 0x7ab648, roughness: 0.9, flatShading: true }));
         crop2.position.set(fx - 1.2 + k * 0.8, 0.45, fz); crop2.castShadow = true; scene.add(crop2);
       }
     });
@@ -612,9 +794,9 @@ export function buildWorld(THREE, scene, level) {
     // Nalanda: courtyards, stupas, library, observatory, gardens
     const stone = 0xcbb27f;
     [[-12, -6], [12, -6], [-12, 8], [12, 8]].forEach(([x, z]) => {
-      box(5, 3, 5, stone, x, z, 0, 0, 3.2);
+      box(5, 3, 5, 0xffffff, x, z, 0, 0, 3.2, T_stone('#cbb27f', '#a89468'));
       const st = new THREE.Mesh(new THREE.ConeGeometry(1.6, 2.2, 4),
-        new THREE.MeshStandardMaterial({ color: 0xa5824f, roughness: 0.8 }));
+        getMaterial({ color: 0xa5824f, roughness: 0.8 }));
       st.position.set(x, 4.1, z); st.rotation.y = Math.PI / 4; st.castShadow = true; scene.add(st);
     });
     // ---- streets: main axes + lanes ----
@@ -624,9 +806,9 @@ export function buildWorld(THREE, scene, level) {
     street(20, -8, 20, 14, 2.5);
     // ---- EAST DORMITORIES — rooms around a courtyard tree ----
     [[26, -5], [31, -1], [26, 5]].forEach(([hx, hz]) => {
-      box(3.5, 2.6, 3, 0xa5824f, hx, hz, 0, 0, 2.2);
+      box(3.5, 2.6, 3, 0xffffff, hx, hz, 0, 0, 2.2, T_plaster('#a5824f', '#857052'));
       const roof = new THREE.Mesh(new THREE.ConeGeometry(2.8, 1.4, 4),
-        new THREE.MeshStandardMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
+        getMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
       roof.position.set(hx, 3.3, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true; scene.add(roof);
     });
     tree(28.5, 0, 1);
@@ -643,7 +825,7 @@ export function buildWorld(THREE, scene, level) {
     // ---- NORTH MEDITATION platforms ----
     [[-14, 31], [14, 31]].forEach(([mx, mz]) => {
       const disc = new THREE.Mesh(new THREE.CircleGeometry(2.4, 20),
-        new THREE.MeshStandardMaterial({ color: 0xd9c48f, roughness: 0.9 }));
+        getMaterial({ color: 0xd9c48f, roughness: 0.9 }));
       disc.rotation.x = -Math.PI / 2; disc.position.set(mx, 0.03, mz); scene.add(disc);
       tree(mx, mz, 1.1);
       box(1.3, 0.45, 0.5, 0x8a5a35, mx - 1.5, mz + 1.8, 0, 0.2, 0.7);
@@ -651,10 +833,10 @@ export function buildWorld(THREE, scene, level) {
     // ---- SW INSTRUMENT SHED near the observatory ----
     [[-23.5, -13.5], [-20.5, -13.5], [-23.5, -10.5], [-20.5, -10.5]].forEach(([px, pz]) =>
       cyl(0.12, 0.14, 2.2, 0x4a3220, px, pz));
-    box(4.2, 0.25, 4.2, 0x8a5a2e, -22, -12, 2.2);
-    box(1.6, 0.8, 1, 0x8a5a35, -22, -12, 0, 0, 1);
+    box(4.2, 0.25, 4.2, 0xffffff, -22, -12, 2.2, 0, 0, T_wood('#8a5a2e'));
+    box(1.6, 0.8, 1, 0xffffff, -22, -12, 0, 0, 1, T_wood('#8a5a35'));
     const chart = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1),
-      new THREE.MeshStandardMaterial({ color: 0x1a2a4a, emissive: 0x35b6d9, emissiveIntensity: 0.5, side: THREE.DoubleSide }));
+      getMaterial({ color: 0x1a2a4a, emissive: 0x35b6d9, emissiveIntensity: 0.5, side: 2 }));
     chart.position.set(-22, 1.6, -13.8); scene.add(chart);
     // ---- CAMPUS WALLS with corner towers ----
     wallRun(-30, 37, 30, 37, 3);
@@ -662,61 +844,62 @@ export function buildWorld(THREE, scene, level) {
     wallRun(-34, -10, -34, 20, 3); wallRun(36, -10, 36, 20, 3);
     wallTower(-30, 37); wallTower(30, 37); wallTower(-30, 26); wallTower(30, 26);
     // ---- WEST LEARNING HALLS — two varied lecture buildings ----
-    box(6, 3.5, 5, 0xcbb27f, -22, 6, 0, 0, 3.8);
+    box(6, 3.5, 5, 0xffffff, -22, 6, 0, 0, 3.8, T_stone('#cbb27f', '#a89468'));
     box(6.6, 0.4, 5.6, 0xa5824f, -22, 6, 3.5);
-    [[-24.2, 3.2], [-19.8, 3.2]].forEach(([px, pz]) => cyl(0.24, 0.28, 2.6, 0xc9a05e, px, pz));
-    box(5, 3, 4, 0xbf9f6a, -22, 14, 0, 0.08, 3.2);
+    [[-24.2, 3.2], [-19.8, 3.2]].forEach(([px, pz]) => cyl(0.24, 0.28, 2.6, 0xffffff, px, pz, 0, 10, T_stone('#c9a05e', '#a3864e')));
+    box(5, 3, 4, 0xffffff, -22, 14, 0, 0.08, 3.2, T_plaster('#bf9f6a', '#a08858'));
     box(2, 2.2, 0.3, 0x4a2f14, -22, 11.9, 0);
     // open-air study desks under the trees
     [[-16, 8], [-14.5, 9.5]].forEach(([dx, dz], i) => {
-      box(1.4, 0.6, 0.9, 0x8a5a35, dx, dz, 0, i * 0.3, 0.8);
+      box(1.4, 0.6, 0.9, 0xffffff, dx, dz, 0, i * 0.3, 0.8, T_wood('#8a5a35'));
       box(0.4, 0.3, 0.5, 0xd94f3d, dx, dz, 0.6, -i * 0.2);
     });
     addLandmark({ x: -22, z: 10, r: 4.5, icon: '🎓', title: 'LEARNING HALLS',
       fact: 'Students debated logic, grammar and philosophy in halls like these.', signY: 5 });
     // ---- GREAT LIBRARY — enterable: walk through the door, browse the shelves ----
-    box(8.4, 0.14, 5.8, 0x8a6f45, 0, 12, 0);                             // floor
+    box(8.4, 0.14, 5.8, 0xffffff, 0, 12, 0, 0, 0, T_stone('#8a6f45', '#6f5a38')); // floor
+    const LIBP = T_plaster('#b5894e', '#96754a');
     [[-2.7], [0], [2.7]].forEach(([wx]) => {                             // back wall
-      box(2.6, 3.2, 0.5, 0xb5894e, wx, 14.5, 0);
+      box(2.6, 3.2, 0.5, 0xffffff, wx, 14.5, 0, 0, 0, LIBP);
       H.colliders.push({ x: wx, z: 14.5, r: 1.3 });
     });
     [-4, 4].forEach(wx => {                                              // side walls
-      box(0.5, 3.2, 5.4, 0xb5894e, wx, 12, 0);
+      box(0.5, 3.2, 5.4, 0xffffff, wx, 12, 0, 0, 0, LIBP);
       H.colliders.push({ x: wx, z: 11, r: 1.3 }, { x: wx, z: 13.5, r: 1.3 });
     });
     [-2.7, 2.7].forEach(wx => {                                          // front wall + open door
-      box(2.6, 3.2, 0.5, 0xb5894e, wx, 9.5, 0);
+      box(2.6, 3.2, 0.5, 0xffffff, wx, 9.5, 0, 0, 0, LIBP);
       H.colliders.push({ x: wx, z: 9.5, r: 1.3 });
     });
     [-1.4, 1.4].forEach(wx => cyl(0.2, 0.24, 3, 0x6a4a2a, wx, 9.5));      // door posts
     H.colliders.push({ x: -1.4, z: 9.5, r: 0.4 }, { x: 1.4, z: 9.5, r: 0.4 });
-    box(8.8, 0.4, 6.2, 0x8a6a45, 0, 12, 3.4);                            // roof slab
+    box(8.8, 0.4, 6.2, 0xffffff, 0, 12, 3.4, 0, 0, T_wood('#8a6a45')); // roof slab
     [[-3.7, 10], [3.7, 10], [-3.7, 14], [3.7, 14]].forEach(([px, pz]) => {
-      cyl(0.22, 0.26, 3.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.4 });
+      cyl(0.22, 0.26, 3.4, 0xffffff, px, pz, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: px, z: pz, r: 0.4 });
     });
     [-2.6, 2.6].forEach(sx => [11.8, 13.2].forEach(sz => {               // shelf rows, open aisle
-      box(1.6, 1.7, 0.6, 0x6a4a2a, sx, sz, 0);
+      box(1.6, 1.7, 0.6, 0xffffff, sx, sz, 0, 0, 0, T_wood('#6a4a2a'));
       const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.2, 8),
-        new THREE.MeshStandardMaterial({ color: 0xe8c547, roughness: 0.7 }));
+        getMaterial({ color: 0xe8c547, roughness: 0.7 }));
       roll.rotation.z = Math.PI / 2; roll.position.set(sx, 1.85, sz); scene.add(roll);
       H.colliders.push({ x: sx, z: sz, r: 1.0 });
     }));
-    box(1.4, 0.6, 0.9, 0x8a5a35, 2.6, 10.8, 0, 0.1, 0.8);                // reading table
+    box(1.4, 0.6, 0.9, 0xffffff, 2.6, 10.8, 0, 0.1, 0.8, T_wood('#8a5a35')); // reading table
     [[-2.6, 10.6, 0xd94f3d], [-2.1, 10.8, 0x3d7bd9], [-2.35, 11.1, 0x3d8a4f]].forEach(([bx3, bz3, bc]) =>
       box(0.5, 0.35, 0.7, bc, bx3, bz3, 0, 0.3));                        // book piles inside
     addLandmark({ x: 0, z: 12, r: 5, icon: '📚', title: 'THE GREAT LIBRARY',
       fact: 'Nalanda’s libraries are said to have held lakhs of handwritten manuscripts! You can walk inside.', signY: 5.4 });
     // observatory platform + stargazing tube
-    cyl(3, 3.4, 1, 0x9a9a9a, -14, -14); H.colliders.push({ x: -14, z: -14, r: 3.4 });
+    cyl(3, 3.4, 1, 0xffffff, -14, -14, 0, 12, T_stone('#9a9a9a', '#7e7e7e')); H.colliders.push({ x: -14, z: -14, r: 3.4 });
     cyl(0.15, 0.15, 3, 0x6a4a1a, -14, -14, 1);
     const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 2.2, 10),
-      new THREE.MeshStandardMaterial({ color: 0x8a6a35, roughness: 0.5, metalness: 0.4 }));
+      getMaterial({ color: 0x8a6a35, roughness: 0.5, metalness: 0.4 }));
     tube.position.set(-14, 2.6, -14); tube.rotation.z = 0.7; tube.castShadow = true; scene.add(tube);
     addLandmark({ x: -14, z: -14, r: 4.5, icon: '🔭', title: 'OBSERVATORY',
       fact: 'Scholars here tracked the stars and planets across the night sky.', signY: 4.8 });
     // garden stupas
     [[6, 4], [8, 6], [-7, 2]].forEach(([x, z]) => {
-      cyl(0.9, 1.1, 1.4, 0xd9c48f, x, z); H.colliders.push({ x, z, r: 1.2 });
+      cyl(0.9, 1.1, 1.4, 0xffffff, x, z, 0, 12, T_stone('#d9c48f', '#b3a071')); H.colliders.push({ x, z, r: 1.2 });
     });
     addLandmark({ x: 7, z: 5, r: 4, icon: '🛕', title: 'STUPA GARDEN',
       fact: 'Quiet gardens where monks walked, debated and meditated.', signY: 3.6 });
@@ -732,7 +915,7 @@ export function buildWorld(THREE, scene, level) {
       box(3, 1, 1, 0x3e8e4f, hx, hz, 0, 0, 1.3);
     });
     const pond = new THREE.Mesh(new THREE.CircleGeometry(2, 20),
-      new THREE.MeshStandardMaterial({ color: 0x35b6d9, roughness: 0.2 }));
+      getMaterial({ color: 0x35b6d9, roughness: 0.2 }));
     pond.rotation.x = -Math.PI / 2; pond.position.set(0, 0.03, 23); scene.add(pond);
     H.colliders.push({ x: 0, z: 23, r: 2.2 });
     [[-3.5, 23.5], [3.5, 23.5]].forEach(([bx4, bz4]) => {
@@ -741,8 +924,9 @@ export function buildWorld(THREE, scene, level) {
     [[-5, 22], [5, 22], [0, 26.5]].forEach(([lx, lz]) => {
       cyl(0.18, 0.24, 0.9, 0x9a9a9a, lx, lz);
       const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4),
-        new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.2 }));
+        getMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.2 }));
       lamp.position.set(lx, 1.1, lz); scene.add(lamp);
+      addGlow(lx, 1.25, lz, 0xffb13c, 1.5, 0.4);
     });
     tree(-5, 26, 0.9); tree(5, 27, 1);
     addLandmark({ x: 0, z: 23, r: 4.5, icon: '🪷', title: 'READING GARDEN',
@@ -759,14 +943,15 @@ export function buildWorld(THREE, scene, level) {
     [[-6, -26], [0, -28], [6, -26]].forEach(([sx, sz]) => {
       cyl(0.8, 1, 1.2, 0xd9c48f, sx, sz); H.colliders.push({ x: sx, z: sz, r: 1.1 });
       const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 8),
-        new THREE.MeshStandardMaterial({ color: 0xa5824f, roughness: 0.8 }));
+        getMaterial({ color: 0xa5824f, roughness: 0.8 }));
       tip.position.set(sx, 1.6, sz); scene.add(tip);
     });
     [[-3, -24], [3, -24]].forEach(([lx, lz]) => {
       cyl(0.14, 0.18, 1.4, 0x9a9a9a, lx, lz);
       const lamp3 = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.4 }));
+        getMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.4 }));
       lamp3.position.set(lx, 1.6, lz); scene.add(lamp3);
+      addGlow(lx, 1.7, lz, 0xffe9a8, 1.4, 0.4);
     });
     // ---- SE STUDY CIRCLE ----
     tree(24, 14, 1.1);
@@ -778,17 +963,17 @@ export function buildWorld(THREE, scene, level) {
     [-2.5, 2.5].forEach(gx => { cyl(0.4, 0.5, 4.2, 0xcbb27f, gx, 26); H.colliders.push({ x: gx, z: 26, r: 0.7 }); });
     box(7, 0.7, 1.2, 0xa5824f, 0, 26, 4.2);
     [-7, 7].forEach(gx => {
-      box(5, 3, 1, 0xcbb27f, gx, 26, 0, 0, 2.5);
+      box(5, 3, 1, 0xffffff, gx, 26, 0, 0, 2.5, T_stone('#cbb27f', '#a89468'));
       const cap = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1, 4),
-        new THREE.MeshStandardMaterial({ color: 0xa5824f, roughness: 0.8, flatShading: true }));
+        getMaterial({ color: 0xa5824f, roughness: 0.8, flatShading: true }));
       cap.position.set(gx, 3.5, 26); cap.rotation.y = Math.PI / 4; scene.add(cap);
     });
     banner(-3.5, 26, 0xe8c547); banner(3.5, 26, 0xe8c547);
     const spath = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 11),
-      new THREE.MeshStandardMaterial({ color: 0xf5e6c4, roughness: 0.9 }));
+      getMaterial({ color: 0xf5e6c4, roughness: 0.9 }));
     spath.rotation.x = -Math.PI / 2; spath.position.set(0, 0.02, 30.5); scene.add(spath);
-    box(6, 0.4, 4, 0xd9c48f, 0, 33, 0);
-    box(2, 0.8, 1.2, 0x8a5a35, 0, 33, 0.4, 0, 1.2);
+    box(6, 0.4, 4, 0xffffff, 0, 33, 0, 0, 0, T_stone('#d9c48f', '#b3a071'));
+    box(2, 0.8, 1.2, 0xffffff, 0, 33, 0.4, 0, 1.2, T_wood('#8a5a35'));
     box(0.45, 0.3, 0.6, 0xd94f3d, -0.5, 33.3, 0.8);
     box(0.45, 0.3, 0.6, 0x3d7bd9, 0.4, 33.1, 0.8);
     tree(-8, 32, 1); tree(8, 32, 1);
@@ -802,7 +987,7 @@ export function buildWorld(THREE, scene, level) {
     [[-18, 4], [17, -4]].forEach(([hx, hz]) => {
       box(3.5, 2.4, 3, 0xa5824f, hx, hz, 0, 0, 2.2);
       const roof = new THREE.Mesh(new THREE.ConeGeometry(3, 1.6, 4),
-        new THREE.MeshStandardMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
+        getMaterial({ color: 0x7a5a35, roughness: 0.9, flatShading: true }));
       roof.position.set(hx, 3.2, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true; scene.add(roof);
     });
     addLandmark({ x: 17, z: -4, r: 4, icon: '🛖', title: 'SCHOLAR QUARTERS',
@@ -811,10 +996,10 @@ export function buildWorld(THREE, scene, level) {
     for (let d = 0; d < 6; d++) {
       const a = (d / 6) * Math.PI * 2;
       const px = 13 + Math.cos(a) * 3, pz = 14 + Math.sin(a) * 3;
-      cyl(0.28, 0.32, 2.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.45 });
+      cyl(0.28, 0.32, 2.4, 0xffffff, px, pz, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: px, z: pz, r: 0.45 });
     }
     const dcarpet = new THREE.Mesh(new THREE.CircleGeometry(2.2, 20),
-      new THREE.MeshStandardMaterial({ color: 0x8a2a35, roughness: 0.9 }));
+      getMaterial({ color: 0x8a2a35, roughness: 0.9 }));
     dcarpet.rotation.x = -Math.PI / 2; dcarpet.position.set(13, 0.03, 14); scene.add(dcarpet);
     addLandmark({ x: 13, z: 14, r: 4, icon: '🗣️', title: 'DEBATE COURTYARD',
       fact: 'Scholars sharpened ideas through fierce — and friendly — debate.', signY: 4.2 });
@@ -826,13 +1011,13 @@ export function buildWorld(THREE, scene, level) {
     P.bounds = 40;
     // Chola: giant temple, gopuram colours, port with boats, village
     const sand = 0xd9b06a;
-    box(6, 7, 6, sand, 0, -14, 0, 0, 5);                       // sanctum
-    box(8, 2.5, 8, 0xc09a55, 0, -8, 0, 0, 4.5);                // mandapa
+    box(6, 7, 6, 0xffffff, 0, -14, 0, 0, 5, T_stone('#d9b06a', '#b3905a')); // sanctum
+    box(8, 2.5, 8, 0xffffff, 0, -8, 0, 0, 4.5, T_stone('#c09a55', '#9c7c48')); // mandapa
     const vim = new THREE.Mesh(new THREE.ConeGeometry(3.4, 5, 4),
-      new THREE.MeshStandardMaterial({ color: 0xb5822e, roughness: 0.7 }));
+      getMaterial({ color: 0xb5822e, roughness: 0.7, flatShading: true }));
     vim.position.set(0, 9.5, -14); vim.rotation.y = Math.PI / 4; vim.castShadow = true; scene.add(vim);
     const fin = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 10),
-      new THREE.MeshStandardMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 1 }));
+      getMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 1 }));
     fin.position.set(0, 12.4, -14); scene.add(fin);
     H.dynamics.push((dt, t) => { fin.rotation.y += dt; });
     // festive painted bands around the sanctum
@@ -841,14 +1026,14 @@ export function buildWorld(THREE, scene, level) {
     addLandmark({ x: 0, z: -12, r: 6.5, icon: '🛕', title: 'THE GREAT TEMPLE',
       fact: 'Chola kings raised soaring stone temples — like Thanjavur’s Brihadeeswara!', signY: 14 });
     // courtyard pillars
-    for (let i = -2; i <= 2; i++) { cyl(0.35, 0.4, 3, 0xc9a05e, i * 3, -4); H.colliders.push({ x: i * 3, z: -4, r: 0.6 }); }
+    for (let i = -2; i <= 2; i++) { cyl(0.35, 0.4, 3, 0xffffff, i * 3, -4, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: i * 3, z: -4, r: 0.6 }); }
     // gopuram gateway south of the sanctum — tiered towers flank the path
     [-3, 3].forEach(gx => {
-      box(2, 2.4, 2, 0xc09a55, gx, -1, 0, 0, 1.4);
-      box(1.5, 1.6, 1.5, 0xb5822e, gx, -1, 2.4);
+      box(2, 2.4, 2, 0xffffff, gx, -1, 0, 0, 1.4, T_stone('#c09a55', '#9c7c48'));
+      box(1.5, 1.6, 1.5, 0xffffff, gx, -1, 2.4, 0, 0, T_stone('#b5822e', '#8f6a28'));
       box(1, 1.2, 1, 0xd94f3d, gx, -1, 4);
       const gf = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 1 }));
+        getMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 1 }));
       gf.position.set(gx, 5, -1); scene.add(gf);
     });
     box(8.4, 0.6, 1.4, 0x8a5a35, 0, -1, 5.2);
@@ -856,11 +1041,11 @@ export function buildWorld(THREE, scene, level) {
       fact: 'Towering gopurams announced the temple long before you reached it.', signY: 6.8 });
     // port: water strip + boats
     const sea = new THREE.Mesh(new THREE.PlaneGeometry(60, 14),
-      new THREE.MeshStandardMaterial({ color: 0x2e8fc4, roughness: 0.2 }));
+      getMaterial({ color: 0x2e8fc4, roughness: 0.2 }));
     sea.rotation.x = -Math.PI / 2; sea.position.set(-16, 0.02, 14); scene.add(sea);
     H.dynamics.push((dt, t) => { sea.position.y = 0.02 + Math.sin(t * 1.4) * 0.03; });
     [[-14, 13], [-19, 15]].forEach(([x, z], i) => {
-      box(3.2, 0.7, 1.2, 0x6b4423, x, z, 0.1, i * 0.3);
+      box(3.2, 0.7, 1.2, 0xffffff, x, z, 0.1, i * 0.3, 0, T_wood('#6b4423'));
       cyl(0.06, 0.06, 2.6, 0x4a3220, x, z, 0.4);
     });
     // second boat + mooring posts
@@ -876,7 +1061,7 @@ export function buildWorld(THREE, scene, level) {
     box(0.7, 0.7, 0.7, 0x7a5228, -13.5, 17.2, 0.6, -0.2, 0.9);
     cyl(0.5, 0.55, 0.8, 0x8a5a35, -12.5, 18.5);
     const rope = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.12, 8, 16),
-      new THREE.MeshStandardMaterial({ color: 0xc9a05e, roughness: 0.9 }));
+      getMaterial({ color: 0xc9a05e, roughness: 0.9 }));
     rope.rotation.x = Math.PI / 2; rope.position.set(-16.5, 0.55, 17); scene.add(rope);
     addLandmark({ x: -16, z: 13, r: 5, icon: '⛵', title: 'HARBOR',
       fact: 'Chola ships carried spices — and stories — across the seas!', signY: 4.4 });
@@ -905,7 +1090,7 @@ export function buildWorld(THREE, scene, level) {
     // ---- WEST QUARRY — stone piles, half-blocks, shed, worker hut ----
     for (let qi = 0; qi < 5; qi++) {
       const pile = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6 + (qi % 3) * 0.25, 0),
-        new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.95, flatShading: true }));
+        getMaterial({ color: 0x9a9a9a, roughness: 0.95, flatShading: true }));
       pile.position.set(-31 + (qi % 3) * 2.2, 0.5, -4 + Math.floor(qi / 3) * 2.4 + (qi % 2));
       pile.castShadow = true; scene.add(pile);
     }
@@ -913,16 +1098,16 @@ export function buildWorld(THREE, scene, level) {
     box(1.2, 0.7, 0.9, 0x9a9a9a, -25.5, 0.5, 0, -0.2);
     [[-29.5, 3.5], [-26.5, 3.5], [-29.5, 6.5], [-26.5, 6.5]].forEach(([px, pz]) =>
       cyl(0.12, 0.14, 2.2, 0x4a3220, px, pz));
-    box(4.2, 0.25, 4.2, 0x8a5a2e, -28, 5, 2.2);
-    box(1.6, 0.8, 1, 0x8a5a35, -28, 5, 0, 0, 1.2);
+    box(4.2, 0.25, 4.2, 0xffffff, -28, 5, 2.2, 0, 0, T_wood('#8a5a2e'));
+    box(1.6, 0.8, 1, 0xffffff, -28, 5, 0, 0, 1.2, T_wood('#8a5a35'));
     houseV(-30, -8, { w: 3.5, h: 2.4, d: 3, c: 0xc9a05e });
     addLandmark({ x: -28, z: 0, r: 4.5, icon: '⛏️', title: 'STONE QUARRY',
       fact: 'Every temple began here — workers split living rock into perfect blocks.', signY: 4.4 });
     // ---- NORTH SHRINES + gardens ----
     [[-8, -28], [8, -28]].forEach(([sx, sz]) => {
-      box(4, 0.4, 4, 0xc09a55, sx, sz, 0);
+      box(4, 0.4, 4, 0xffffff, sx, sz, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
       const vim2 = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 4),
-        new THREE.MeshStandardMaterial({ color: 0xb5822e, roughness: 0.7, flatShading: true }));
+        getMaterial({ color: 0xb5822e, roughness: 0.7, flatShading: true }));
       vim2.position.set(sx, 2, sz); vim2.rotation.y = Math.PI / 4; vim2.castShadow = true; scene.add(vim2);
       H.colliders.push({ x: sx, z: sz, r: 1.8 });
       [[-1.5, 1.5], [1.5, 1.5]].forEach(([ox, oz]) => cyl(0.14, 0.16, 2, 0xc9a05e, sx + ox, sz + oz));
@@ -930,9 +1115,9 @@ export function buildWorld(THREE, scene, level) {
     tree(-12, -28, 0.9); tree(12, -28, 0.9);
     // village streets east of the market
     [[15, 2], [19, 9], [12, 12]].forEach(([hx, hz]) => {
-      box(4, 2.8, 3.5, 0xd9b06a, hx, hz, 0, 0.1, 2.5);
+      box(4, 2.8, 3.5, 0xffffff, hx, hz, 0, 0.1, 2.5, T_plaster('#d9b06a', '#b3905a'));
       const roof = new THREE.Mesh(new THREE.ConeGeometry(3.2, 1.5, 4),
-        new THREE.MeshStandardMaterial({ color: 0x8a4a2e, roughness: 0.9, flatShading: true }));
+        getMaterial({ color: 0x8a4a2e, roughness: 0.9, flatShading: true }));
       roof.position.set(hx, 3.5, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true; scene.add(roof);
     });
     pot(16, 7.5);
@@ -948,7 +1133,7 @@ export function buildWorld(THREE, scene, level) {
       box(3.4, 0.12, 1, 0x6b4a26, fx, fz, 0);
       for (let k = 0; k < 4; k++) {
         const crop3 = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.65, 7),
-          new THREE.MeshStandardMaterial({ color: k % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
+          getMaterial({ color: k % 2 ? 0x7ab648 : 0xd9b64a, roughness: 0.9, flatShading: true }));
         crop3.position.set(fx - 1.2 + k * 0.8, 0.4, fz); scene.add(crop3);
       }
     });
@@ -960,7 +1145,7 @@ export function buildWorld(THREE, scene, level) {
       box(2.6, 0.9, 0.9, 0x2f7a3e, hx, hz, 0, 0, 1.1);
     });
     const rpond = new THREE.Mesh(new THREE.CircleGeometry(1.8, 18),
-      new THREE.MeshStandardMaterial({ color: 0x35b6d9, roughness: 0.2 }));
+      getMaterial({ color: 0x35b6d9, roughness: 0.2 }));
     rpond.rotation.x = -Math.PI / 2; rpond.position.set(27, 0.03, -9); scene.add(rpond);
     H.colliders.push({ x: 27, z: -9, r: 2 });
     box(1.3, 0.45, 0.5, 0x8a5a35, 23.5, -8, 0, 0.4, 0.7);
@@ -977,15 +1162,15 @@ export function buildWorld(THREE, scene, level) {
     addLandmark({ x: 16, z: 7, r: 4.5, icon: '🏡', title: 'VILLAGE',
       fact: 'Farmers, potters and herders lived in villages around the temple city.', signY: 4.8 });
     // ---- ROYAL COURT — pillared hall, dais and throne (inspired, not a specific palace) ----
-    box(9, 0.5, 7, 0xc09a55, 16, -18, 0);
+    box(9, 0.5, 7, 0xffffff, 16, -18, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
     [[13, -20.5], [16, -20.5], [19, -20.5], [13, -15.5], [16, -15.5], [19, -15.5]].forEach(([px, pz]) => {
-      cyl(0.3, 0.36, 3.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.5 });
+      cyl(0.3, 0.36, 3.4, 0xffffff, px, pz, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: px, z: pz, r: 0.5 });
     });
-    box(9.6, 0.4, 7.6, 0x8a5a35, 16, -18, 3.4);
+    box(9.6, 0.4, 7.6, 0xffffff, 16, -18, 3.4, 0, 0, T_wood('#8a5a35'));
     box(2.4, 0.9, 1.6, 0x8a6a45, 16, -19.5, 0.5);                  // dais
     box(1.2, 1.1, 0.8, 0xa8232a, 16, -19.5, 1.2);                 // throne seat
     const rcarpet = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5),
-      new THREE.MeshStandardMaterial({ color: 0xa8232a, roughness: 0.9 }));
+      getMaterial({ color: 0xa8232a, roughness: 0.9 }));
     rcarpet.rotation.x = -Math.PI / 2; rcarpet.position.set(16, 0.53, -17); scene.add(rcarpet);
     banner(12.5, -15, 0xd94f3d); banner(19.5, -15, 0xffd23e);
     addLandmark({ x: 16, z: -18, r: 5, icon: '👑', title: 'ROYAL COURT',
@@ -1001,21 +1186,21 @@ export function buildWorld(THREE, scene, level) {
     // Fort: high walls, towers, gate arch, courtyard, secret chamber door
     const wall = 0xc08a4e;
     [[0, -22, 30, 2], [-16, -8, 2, 26], [16, -8, 2, 26]].forEach(([x, z, w, d]) => {
-      box(w, 5, d, wall, x, z, 0, 0, 0);
+      box(w, 5, d, 0xffffff, x, z, 0, 0, 0, T_stone('#c08a4e', '#9c6c40'));
     });
     [[-16, -20], [16, -20], [-16, 4], [16, 4]].forEach(([x, z]) => {
-      cyl(2, 2.4, 7, 0xa5763e, x, z); H.colliders.push({ x, z, r: 2.6 });
+      cyl(2, 2.4, 7, 0xffffff, x, z, 0, 12, T_stone('#a5763e', '#86603a')); H.colliders.push({ x, z, r: 2.6 });
       const dome = new THREE.Mesh(new THREE.SphereGeometry(2, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshStandardMaterial({ color: 0xe8d8a8, roughness: 0.6 }));
+        getMaterial({ color: 0xffffff, roughness: 0.6, map: T_plaster('#e8d8a8', '#cfc09a') }));
       dome.position.set(x, 7, z); dome.castShadow = true; scene.add(dome);
     });
     // palace block + garden
-    box(6, 3, 5, 0xd9a860, -8, 8, 0, 0, 3.6);
-    box(4, 2.2, 4, 0xb5884a, 8, 8, 0, 0, 3);
+    box(6, 3, 5, 0xffffff, -8, 8, 0, 0, 3.6, T_plaster('#d9a860', '#b8905c'));
+    box(4, 2.2, 4, 0xffffff, 8, 8, 0, 0, 3, T_plaster('#b5884a', '#967052'));
     // outer ward — artisans' facades and stalls beyond the inner court
     [[-8, 17], [0, 19], [8, 17]].forEach(([fx, fz]) => {
-      box(4.5, 3, 3, 0xc08a4e, fx, fz, 0, 0, 2.7);
-      box(5, 0.35, 3.5, 0x8a5a2e, fx, fz, 3);
+      box(4.5, 3, 3, 0xffffff, fx, fz, 0, 0, 2.7, T_stone('#c08a4e', '#9c6c40'));
+      box(5, 0.35, 3.5, 0xffffff, fx, fz, 3, 0, 0, T_wood('#8a5a2e'));
     });
     stall(-4, 14, 0x3d7bd9, 0.15); stall(4, 14, 0xd94f3d, -0.15);
     addLandmark({ x: 0, z: 16, r: 4.5, icon: '🏘️', title: 'ARTISANS’ WARD',
@@ -1024,14 +1209,14 @@ export function buildWorld(THREE, scene, level) {
     [-4, 4].forEach(tx => {
       cyl(1.8, 2.2, 8, 0xa5763e, tx, 26); H.colliders.push({ x: tx, z: 26, r: 2.4 });
       const dome2 = new THREE.Mesh(new THREE.SphereGeometry(1.8, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshStandardMaterial({ color: 0xe8d8a8, roughness: 0.6 }));
+        getMaterial({ color: 0xffffff, roughness: 0.6, map: T_plaster('#e8d8a8', '#cfc09a') }));
       dome2.position.set(tx, 8, 26); dome2.castShadow = true; scene.add(dome2);
     });
     box(12.4, 1, 1.6, 0x8a5a35, 0, 26, 8);
     box(1.6, 3.4, 0.4, 0x3a2412, -2.9, 26, 0, -0.35);
     box(1.6, 3.4, 0.4, 0x3a2412, 2.9, 26, 0, 0.35);
     const oroad = new THREE.Mesh(new THREE.PlaneGeometry(7, 16),
-      new THREE.MeshStandardMaterial({ color: 0xd9bd85, roughness: 0.95 }));
+      getMaterial({ color: 0xd9bd85, roughness: 0.95 }));
     oroad.rotation.x = -Math.PI / 2; oroad.position.set(0, 0.02, 26); scene.add(oroad);
     banner(-6.5, 24, 0xd94f3d); banner(6.5, 24, 0xffd23e);
     [[-9, 30], [9, 30]].forEach(([bx5, bz5]) => {
@@ -1046,15 +1231,15 @@ export function buildWorld(THREE, scene, level) {
     addLandmark({ x: 0, z: 26, r: 5, icon: '🏰', title: 'OUTER GATE',
       fact: 'Armies, traders and travellers all passed beneath gates like this.', signY: 9.4 });
     // ---- ROYAL COURT (diwan) — dais, throne, carpet, banners ----
-    box(9, 0.5, 7, 0xc09a55, 24, -8, 0);
+    box(9, 0.5, 7, 0xffffff, 24, -8, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
     [[21, -10.5], [24, -10.5], [27, -10.5], [21, -5.5], [24, -5.5], [27, -5.5]].forEach(([px, pz]) => {
-      cyl(0.3, 0.36, 3.4, 0xc9a05e, px, pz); H.colliders.push({ x: px, z: pz, r: 0.5 });
+      cyl(0.3, 0.36, 3.4, 0xffffff, px, pz, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: px, z: pz, r: 0.5 });
     });
-    box(9.6, 0.4, 7.6, 0x8a5a35, 24, -8, 3.4);
+    box(9.6, 0.4, 7.6, 0xffffff, 24, -8, 3.4, 0, 0, T_wood('#8a5a35'));
     box(2.4, 0.9, 1.6, 0x8a6a45, 24, -9.5, 0.5);
     box(1.2, 1.1, 0.8, 0xa8232a, 24, -9.5, 1.2);
     const dcarpet2 = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5),
-      new THREE.MeshStandardMaterial({ color: 0xa8232a, roughness: 0.9 }));
+      getMaterial({ color: 0xa8232a, roughness: 0.9 }));
     dcarpet2.rotation.x = -Math.PI / 2; dcarpet2.position.set(24, 0.53, -7); scene.add(dcarpet2);
     banner(20.5, -5, 0xd94f3d); banner(27.5, -5, 0xffd23e);
     addLandmark({ x: 24, z: -8, r: 5, icon: '👑', title: 'ROYAL COURT',
@@ -1066,7 +1251,7 @@ export function buildWorld(THREE, scene, level) {
     tree(20, 2, 0.7); tree(22, 8, 0.7);
     cyl(1.5, 1.7, 0.6, 0x9a9a9a, 20, 5);
     const fw = new THREE.Mesh(new THREE.CircleGeometry(1.2, 18),
-      new THREE.MeshStandardMaterial({ color: 0x35b6d9, roughness: 0.2 }));
+      getMaterial({ color: 0x35b6d9, roughness: 0.2 }));
     fw.rotation.x = -Math.PI / 2; fw.position.set(20, 0.65, 5); scene.add(fw);
     H.colliders.push({ x: 20, z: 5, r: 1.6 });
     // ---- streets: main axis + cross lane ----
@@ -1074,13 +1259,13 @@ export function buildWorld(THREE, scene, level) {
     street(-20, 2, 24, 2, 3);
     street(-10, -14, 10, -14, 2.5);
     // ---- NORTH-WEST STABLES + ARMORY ----
-    box(8, 2.5, 4, 0xb5884a, -25, -4, 0, 0, 4);
-    box(8.5, 0.35, 4.5, 0x8a5a2e, -25, -4, 2.5);
+    box(8, 2.5, 4, 0xffffff, -25, -4, 0, 0, 4, T_plaster('#b5884a', '#967052'));
+    box(8.5, 0.35, 4.5, 0xffffff, -25, -4, 2.5, 0, 0, T_wood('#8a5a2e'));
     box(1.4, 0.7, 0.9, 0xd9b64a, -27, -2, 0, 0.3);                  // hay
     box(1.6, 0.5, 0.7, 0x7a5228, -23, -6.5, 0);                    // trough
     for (let fi = 0; fi < 5; fi++)
       cyl(0.07, 0.09, 1.1, 0x6b4423, -30 + fi * 2.2, 0, 0);        // fence posts
-    box(4, 2.5, 3, 0xa5763e, -25, 7, 0, 0, 2.5);                   // armory
+    box(4, 2.5, 3, 0xffffff, -25, 7, 0, 0, 2.5, T_stone('#a5763e', '#86603a')); // armory
     for (let si = 0; si < 4; si++)
       cyl(0.04, 0.04, 2.2, 0x8a8a8a, -26.2 + si * 0.7, 6.2, 0.15 * si);
     addLandmark({ x: -25, z: 0, r: 4.5, icon: '🐎', title: 'STABLES',
@@ -1097,19 +1282,20 @@ export function buildWorld(THREE, scene, level) {
     // ---- NORTH SHRINE APPROACH — rockery, shrine, lamps, pines ----
     for (let ri = 0; ri < 6; ri++) {
       const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + (ri % 3) * 0.3, 0),
-        new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.95, flatShading: true }));
+        getMaterial({ color: 0x8a8a8a, roughness: 0.95, flatShading: true }));
       rock.position.set(-6 + ri * 2.4, 0.4, -27 + (ri % 2) * 1.6); rock.castShadow = true; scene.add(rock);
     }
     box(3, 0.5, 3, 0xc09a55, 0, -28, 0);
     const dome3 = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0xe8d8a8, roughness: 0.6 }));
+      getMaterial({ color: 0xffffff, roughness: 0.6, map: T_plaster('#e8d8a8', '#cfc09a') }));
     dome3.position.set(0, 1.8, -28); dome3.castShadow = true; scene.add(dome3);
     H.colliders.push({ x: 0, z: -28, r: 1.6 });
     [[-3, -26], [3, -26]].forEach(([lx, lz]) => {
       cyl(0.12, 0.16, 1.6, 0x5a5a5a, lx, lz);
       const lamp2 = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffd23e, emissive: 0xff9a00, emissiveIntensity: 2 }));
+        getMaterial({ color: 0xffd23e, emissive: 0xff9a00, emissiveIntensity: 2 }));
       lamp2.position.set(lx, 1.8, lz); scene.add(lamp2);
+      addGlow(lx, 1.9, lz, 0xffd23e, 1.5, 0.4);
     });
     tree(-6, -29, 1); tree(6, -29, 1); tree(-12, -28, 0.9); tree(12, -28, 0.9);
     addLandmark({ x: 0, z: -28, r: 4, icon: '🛕', title: 'OLD SHRINE',
@@ -1125,28 +1311,28 @@ export function buildWorld(THREE, scene, level) {
     wallRun(-20, -34, 20, -34, 3);
     wallTower(-32, 4); wallTower(36, 4); wallTower(-20, -34); wallTower(20, -34);
     // ---- LOOKOUT TOWER — tall, flagged, with railed platform ----
-    cyl(2, 2.4, 10, 0xa5763e, -20, -14); H.colliders.push({ x: -20, z: -14, r: 2.6 });
+    cyl(2, 2.4, 10, 0xffffff, -20, -14, 0, 12, T_stone('#a5763e', '#86603a')); H.colliders.push({ x: -20, z: -14, r: 2.6 });
     const plat = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.4, 12),
-      new THREE.MeshStandardMaterial({ color: 0x8a5a35, roughness: 0.8 }));
+      getMaterial({ color: 0x8a5a35, roughness: 0.8 }));
     plat.position.set(-20, 10.2, -14); plat.castShadow = true; scene.add(plat);
     const rail = new THREE.Mesh(new THREE.TorusGeometry(2.9, 0.09, 8, 20),
-      new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.8 }));
+      getMaterial({ color: 0x6b4423, roughness: 0.8 }));
     rail.rotation.x = Math.PI / 2; rail.position.set(-20, 11.1, -14); scene.add(rail);
     cyl(0.07, 0.09, 2.6, 0x4a3220, -20, -14, 10.4);
     const lflag = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.8),
-      new THREE.MeshStandardMaterial({ color: 0xffd23e, side: THREE.DoubleSide }));
+      getMaterial({ color: 0xffd23e, side: 2 }));
     lflag.position.set(-19.3, 12.6, -14); scene.add(lflag);
     H.dynamics.push((dt, t) => { lflag.rotation.y = Math.sin(t * 2.4) * 0.4; });
     addLandmark({ x: -20, z: -14, r: 4, icon: '🗼', title: 'LOOKOUT TOWER',
       fact: 'Watchmen scanned the horizon from towers like this one.', signY: 12.6 });
     // ---- PROCESSIONAL COLONNADE along the main axis ----
     [[-5, -4], [5, -4], [-5, 0], [5, 0], [-5, 4], [5, 4]].forEach(([cx3, cz3]) => {
-      cyl(0.3, 0.36, 3.2, 0xc9a05e, cx3, cz3); H.colliders.push({ x: cx3, z: cz3, r: 0.45 });
+      cyl(0.3, 0.36, 3.2, 0xffffff, cx3, cz3, 0, 10, T_stone('#c9a05e', '#a3864e')); H.colliders.push({ x: cx3, z: cz3, r: 0.45 });
     });
     box(0.5, 0.4, 13, 0x8a5a35, -5, 0, 3.3);
     box(0.5, 0.4, 13, 0x8a5a35, 5, 0, 3.3);
     const carpet = new THREE.Mesh(new THREE.PlaneGeometry(3, 6),
-      new THREE.MeshStandardMaterial({ color: 0xa8232a, roughness: 0.9 }));
+      getMaterial({ color: 0xa8232a, roughness: 0.9 }));
     carpet.rotation.x = -Math.PI / 2; carpet.position.set(-8, 0.03, 3.5); scene.add(carpet);
     addLandmark({ x: -8, z: 8, r: 4.5, icon: '👑', title: 'DURBAR HALL',
       fact: 'Kings held court here — poets, scholars and generals gathered below.', signY: 4.8 });
@@ -1163,6 +1349,16 @@ export function buildWorld(THREE, scene, level) {
   }
 
   H.bounds = P.bounds || 24;
+
+  // Shadow frustum hugs the real playable bounds (not a fixed guess):
+  // tighter texel density + bias tuned once here for every level.
+  sun.shadow.camera.left = -(H.bounds + 8);
+  sun.shadow.camera.right = H.bounds + 8;
+  sun.shadow.camera.top = H.bounds + 8;
+  sun.shadow.camera.bottom = -(H.bounds + 8);
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.bias = -0.0002;
+  sun.shadow.normalBias = 0.6;
 
   // ---------- NPCs (placed BEFORE collectibles so the safety solver
   // accounts for their space too) ----------
@@ -1213,9 +1409,9 @@ export function buildWorld(THREE, scene, level) {
   // ---------- KALAM companion bot (follows at distance, hovers) ----------
   const kalam = new THREE.Group();
   const kbody = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0x35e0ff, emissive: 0x1899bb, emissiveIntensity: 0.9, roughness: 0.3 }));
+    getMaterial({ color: 0x35e0ff, emissive: 0x1899bb, emissiveIntensity: 0.9, roughness: 0.3 }));
   kbody.position.y = 1.6; kalam.add(kbody);
-  const keye = new THREE.MeshBasicMaterial({ color: 0x0a1a22 });
+  const keye = getMaterial({ color: 0x0a1a22, basic: true });
   [-0.11, 0.11].forEach(x => {
     const e = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), keye);
     e.position.set(x, 1.66, 0.27); kalam.add(e);
