@@ -1,6 +1,7 @@
 // Procedural stylized environments — one builder per era, shared helpers.
 // No external models; lighting + fog + props keep every level distinct.
 import { ARTIFACT_INFO } from './data.js';
+import { AssetManager, HERO_SPOTS } from './assets.js';
 import { Save } from './save.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -802,18 +803,74 @@ export function buildWorld(THREE, scene, level) {
         win.position.set(x + wx, 1.6, z + 2.02); scene.add(win);
       });
     });
-    // GREAT BATH — stepped sunken pool with columns, instantly readable
-    box(8.6, 0.5, 6.6, 0xffffff, -2, -8, 0, 0, 0, T_stone('#9a6a38', '#7d5630')); // rim platform
+    // GREAT BATH — stepped sunken pool with columns, instantly readable.
+    // Built inside bathGroup so the GLB hero can hide ONLY this visible
+    // geometry on success. Collider/landmark/quest below stay untouched.
+    const bathGroup = new THREE.Group();
+    scene.add(bathGroup);
+    const pm = (geo, mat, x, y, z, ry = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z); m.rotation.y = ry;
+      m.castShadow = true; m.receiveShadow = true;
+      bathGroup.add(m);
+      return m;
+    };
+    const bathStoneRim = getMaterial({ color: 0xffffff, roughness: 0.92, map: T_stone('#9a6a38', '#7d5630') });
+    const bathStoneDark = getMaterial({ color: 0xffffff, roughness: 0.92, map: T_stone('#7a5228', '#614722') });
+    const bathStoneCol = getMaterial({ color: 0xffffff, roughness: 0.9, map: T_stone('#c09a55', '#9c7c48') });
+    const bathWood = getMaterial({ color: 0xffffff, roughness: 0.9, map: T_wood('#8a6a35') });
+    pm(new THREE.BoxGeometry(8.6, 0.5, 6.6), bathStoneRim, -2, 0.25, -8); // rim platform
     const bathWater = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.5, 3.8),
       getMaterial({ color: 0x2ea8d4, roughness: 0.1, metalness: 0.25, emissive: 0x0a4a66, emissiveIntensity: 0.35 }));
-    bathWater.position.set(-2, 0.45, -8); scene.add(bathWater);
-    H.dynamics.push((dt, t) => { bathWater.position.y = 0.45 + Math.sin(t * 1.6) * 0.04; });
+    bathWater.position.set(-2, 0.45, -8); bathGroup.add(bathWater);
+    H.dynamics.push((dt, t) => { if (bathGroup.visible) bathWater.position.y = 0.45 + Math.sin(t * 1.6) * 0.04; });
     for (let s = 0; s < 3; s++)                                   // steps down (south side)
-      box(3.2 - s * 0.5, 0.28, 0.6, 0xffffff, -2, -4.6 + s * 0.55, 0.35 - s * 0.12, 0, 0, T_stone('#7a5228', '#614722'));
+      pm(new THREE.BoxGeometry(3.2 - s * 0.5, 0.28, 0.6), bathStoneDark, -2, 0.35 - s * 0.12 + 0.14, -4.6 + s * 0.55);
     [[-5.4, -10.6], [1.4, -10.6], [-5.4, -5.4], [1.4, -5.4]].forEach(([cx2, cz2]) => {
-      cyl(0.28, 0.34, 3.2, 0xffffff, cx2, cz2, 0, 12, T_stone('#c09a55', '#9c7c48')); // colonnade
-      box(1, 0.3, 1, 0xffffff, cx2, cz2, 3.2, 0, 0, T_wood('#8a6a35'));
+      pm(new THREE.CylinderGeometry(0.28, 0.34, 3.2, 12), bathStoneCol, cx2, 1.6, cz2); // colonnade
+      pm(new THREE.BoxGeometry(1, 0.3, 1), bathWood, cx2, 3.35, cz2);
     });
+    // Hero GLB swap: same landmark, same footprint, zero gameplay change.
+    // Fire-and-forget: procedural bath is already playable; the GLB swaps
+    // in when (and only when) it loads successfully.
+    try {
+      const bathSpot = (HERO_SPOTS[1] || [])[0];
+      if (bathSpot && bathSpot.url) {
+        AssetManager.resolveHero(bathSpot.id, bathSpot.url).then(hero => {
+          if (!hero) return; // fallback stays visible
+          const bb = new THREE.Box3().setFromObject(hero);
+          const size = bb.getSize(new THREE.Vector3());
+          const s = Math.min(7.4 / (size.x || 1), 7.4 / (size.z || 1));
+          hero.scale.setScalar(s);
+          const bb2 = new THREE.Box3().setFromObject(hero);
+          hero.position.set(
+            bathSpot.pos[0] - (bb2.min.x + bb2.max.x) / 2,
+            -bb2.min.y,
+            bathSpot.pos[2] - (bb2.min.z + bb2.max.z) / 2
+          );
+          hero.traverse(o => { // PBR fix: export is raw white + metal=1 with no
+            // envmap/textures, which renders as black chrome or chalk. Keep the
+            // authored geometry; restore the fired-brick look of the reference.
+            if (o.isMesh) {
+              const ms = Array.isArray(o.material) ? o.material : [o.material];
+              ms.forEach(m => {
+                if (m.metalness > 0.5) m.metalness = 0.05;
+                if (m.color && m.color.getHex() === 0xffffff) m.color.set(0xc49a6b);
+                if (m.roughness < 0.5) m.roughness = 0.95;
+              });
+            }
+          });
+          // still pool water inside the hero basin (reuses the staged water look)
+          const heroWater = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.3, 2.6),
+            getMaterial({ color: 0x2ea8d4, roughness: 0.1, metalness: 0.25, emissive: 0x0a4a66, emissiveIntensity: 0.35 }));
+          heroWater.position.set(-2, 0.4, -8);
+          scene.add(heroWater);
+          H.dynamics.push((dt, t) => { heroWater.position.y = 0.4 + Math.sin(t * 1.6) * 0.03; });
+          scene.add(hero);
+          bathGroup.visible = false;
+        }).catch(() => { /* fallback stays visible */ });
+      }
+    } catch { /* fallback stays visible */ }
     H.colliders.push({ x: -2, z: -8, r: 4.2 });
     addLandmark({ x: -2, z: -8, r: 5, icon: '🛁', title: 'THE GREAT BATH',
       fact: 'Mohenjo-daro had a watertight pool — probably used for ritual bathing 4,500 years ago!', signY: 5.2 });

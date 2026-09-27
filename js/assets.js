@@ -15,9 +15,11 @@ export const HERO_BASE_URL = null;
 // pos: footprint center · size: approx. bounding size the procedural
 // version occupies (used to scale/frame a future replacement).
 // fallback: which procedural builder currently owns the spot.
+// url: optional explicit GLB path for this spot (overrides HERO_BASE_URL
+// naming); spots without url keep the procedural fallback.
 export const HERO_SPOTS = {
   1: [
-    { id: 'indus-great-bath', pos: [-2, 0, -8], size: [9, 4, 7], fallback: 'Great Bath (world.js L1)' }
+    { id: 'indus-great-bath', pos: [-2, 0, -8], size: [9, 4, 7], fallback: 'Great Bath (world.js L1)', url: 'assets/models/indus/greatbath.glb' }
   ],
   2: [
     { id: 'nalanda-library', pos: [0, 0, 12], size: [8, 4, 6], fallback: 'Great Library, enterable (world.js L2)' }
@@ -45,14 +47,15 @@ export const AssetManager = {
   cache: new Map(),
 
   /** Load (and cache) a GLB by hero id. Returns null when unavailable. */
-  async loadHero(id) {
-    if (!HERO_BASE_URL) return null;
-    if (this.cache.has(id)) return this.cache.get(id);
+  async loadHero(id, urlOverride = null) {
+    const url = urlOverride || (HERO_BASE_URL ? `${HERO_BASE_URL}${id}.glb` : null);
+    if (!url) return null;
+    if (this.cache.has(url)) return this.cache.get(url);
     try {
       const loader = await gltfLoader();
-      const gltf = await loader.loadAsync(`${HERO_BASE_URL}${id}.glb`);
+      const gltf = await loader.loadAsync(url);
       gltf.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      this.cache.set(id, gltf);
+      this.cache.set(url, gltf);
       return gltf;
     } catch (err) {
       console.warn(`[assets] hero "${id}" unavailable, using procedural fallback`, err);
@@ -61,8 +64,9 @@ export const AssetManager = {
   },
 
   /** Clone a cached hero for placement (shares geometries/materials). */
-  cloneHero(id) {
-    const g = this.cache.get(id);
+  cloneHero(id, urlOverride = null) {
+    const url = urlOverride || (HERO_BASE_URL ? `${HERO_BASE_URL}${id}.glb` : null);
+    const g = url ? this.cache.get(url) : this.cache.get(id);
     return g ? g.scene.clone(true) : null;
   },
 
@@ -87,8 +91,8 @@ export const AssetManager = {
    *   if (hero) { hero.position.set(...); scene.add(hero); }
    *   else { /* existing procedural builder *\/ }
    */
-  async resolveHero(id) {
-    const gltf = await this.loadHero(id);
-    return gltf ? this.cloneHero(id) : null;
+  async resolveHero(id, urlOverride = null) {
+    const gltf = await this.loadHero(id, urlOverride);
+    return gltf ? this.cloneHero(id, urlOverride) : null;
   }
 };
