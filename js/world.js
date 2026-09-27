@@ -464,6 +464,131 @@ export function buildWorld(THREE, scene, level) {
     win.rotation.y = ry; scene.add(win);
   }
 
+  // ============ SLICE 2: instanced scatter + district helpers (visual only) ============
+  // Scatter lists hold [x, z, ...] with NO colliders — safe for distant scenery
+  // and small off-path decor. Near-field buildings use houseV/box (with colliders).
+  const SC = { rock: [], bush: [], grass: [], dhouse: [], droof: [], trunk: [], canopy: [] };
+  function scatterRock(x, z, s = 1) { SC.rock.push([x, z, s, R() * 6.28]); }
+  function scatterBush(x, z, s = 1) { SC.bush.push([x, z, s, R() * 6.28]); }
+  function scatterGrass(x, z, s = 1) { SC.grass.push([x, z, s, R() * 6.28]); }
+  function distantHouse(x, z, w, h, d, tone = 0) { SC.dhouse.push([x, z, w, h, d, tone]); SC.droof.push([x, z, w, h, d, tone]); }
+  function scatterTree(x, z, s = 1) { SC.trunk.push([x, z, s]); SC.canopy.push([x, z, s]); }
+  const _dummy = new THREE.Object3D();
+  const _c = new THREE.Color();
+  function pickIdx(n, x, z) { return Math.abs(Math.round(x * 7 + z * 13)) % n; }
+  function buildInstanced(geo, list, matOpts, paint, shadow = true) {
+    if (!list.length) return null;
+    const m = new THREE.InstancedMesh(geo, getMaterial(matOpts), list.length);
+    list.forEach((e, i) => { paint(e, i); m.setColorAt(i, _c); });
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    m.castShadow = shadow; m.receiveShadow = true;
+    scene.add(m);
+    return m;
+  }
+  function buildScatter() {
+    buildInstanced(new THREE.DodecahedronGeometry(1, 0), SC.rock,
+      { color: 0xffffff, roughness: 0.95, flatShading: true }, (e) => {
+        _dummy.position.set(e[0], e[2] * 0.35, e[1]); _dummy.scale.setScalar(e[2]);
+        _dummy.rotation.set(0, e[3], 0); _dummy.updateMatrix();
+        _c.set([0x8a8a8a, 0x9a8a72, 0x7a6a58][pickIdx(3, e[0], e[1])]);
+      });
+    buildInstanced(new THREE.SphereGeometry(1, 8, 6), SC.bush,
+      { color: 0xffffff, roughness: 0.95, flatShading: true }, (e) => {
+        _dummy.position.set(e[0], e[2] * 0.45, e[1]); _dummy.scale.set(e[2], e[2] * 0.7, e[2]);
+        _dummy.rotation.set(0, e[3], 0); _dummy.updateMatrix();
+        _c.set([0x3e8e4f, 0x4da35a, 0x6fae4e][pickIdx(3, e[0], e[1])]);
+      });
+    buildInstanced(new THREE.ConeGeometry(0.35, 0.9, 5), SC.grass,
+      { color: 0xffffff, roughness: 1, flatShading: true }, (e) => {
+        _dummy.position.set(e[0], e[2] * 0.4, e[1]); _dummy.scale.setScalar(e[2]);
+        _dummy.rotation.set(0, e[3], 0); _dummy.updateMatrix();
+        _c.set([0x7ab648, 0xd9b64a, 0x4da35a][pickIdx(3, e[0], e[1])]);
+      }, false);
+    buildInstanced(new THREE.BoxGeometry(1, 1, 1), SC.dhouse,
+      { color: 0xffffff, roughness: 0.92, map: T_brick('#b5763f', '#8a6a45') }, (e) => {
+        _dummy.position.set(e[0], e[3] / 2, e[1]); _dummy.scale.set(e[2], e[3], e[4]);
+        _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        _c.set([0xffffff, 0xf2ddc4, 0xe8cfae][e[5] % 3]).multiplyScalar(0.95);
+      });
+    buildInstanced(new THREE.ConeGeometry(0.72, 0.55, 4), SC.droof,
+      { color: 0xffffff, roughness: 0.9, flatShading: true }, (e) => {
+        _dummy.position.set(e[0], e[3] + e[3] * 0.26, e[1]); _dummy.scale.set(e[2], e[3], e[4]);
+        _dummy.rotation.set(0, Math.PI / 4, 0); _dummy.updateMatrix();
+        _c.set([0x8a5a2e, 0x7a4a28, 0x9a6a38][e[5] % 3]);
+      });
+    buildInstanced(new THREE.CylinderGeometry(0.16, 0.24, 2.4, 7), SC.trunk,
+      { color: 0xffffff, roughness: 0.9, map: T_wood('#6b4423') }, (e) => {
+        _dummy.position.set(e[0], 1.2 * e[2], e[1]); _dummy.scale.setScalar(e[2]);
+        _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        _c.set(0xffffff);
+      });
+    buildInstanced(new THREE.SphereGeometry(1.5, 9, 7), SC.canopy,
+      { color: 0xffffff, roughness: 0.95, flatShading: true }, (e) => {
+        _dummy.position.set(e[0], (2.4 + 0.9) * e[2], e[1]); _dummy.scale.set(e[2], e[2] * 0.85, e[2]);
+        _dummy.rotation.set(0, e[0], 0); _dummy.updateMatrix();
+        _c.set([0x3e8e4f, 0x4da35a, 0x2f7a3e][pickIdx(3, e[0], e[1])]);
+      });
+  }
+  // Small plaza court: disc + benches + pots + lamp glow (colliders included).
+  function addCourtyard(cx, cz, r = 4, withTree = true) {
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 22),
+      getMaterial({ color: 0xf5e6c4, roughness: 0.9 }));
+    disc.rotation.x = -Math.PI / 2; disc.position.set(cx, 0.03, cz); disc.receiveShadow = true; scene.add(disc);
+    [[-1, 0], [1, 0]].forEach(([ox, oz], i) => {
+      box(1.4, 0.45, 0.5, 0xffffff, cx + ox * (r - 1), cz + oz * (r - 1), 0, i * 0.4, 0.7, T_wood('#8a5a35'));
+    });
+    pot(cx - r + 1, cz + 1); pot(cx + r - 1, cz - 1);
+    cyl(0.12, 0.16, 2.2, 0x4a3220, cx + r - 0.6, cz + r - 0.6);
+    const lampG = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8),
+      getMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.6 }));
+    lampG.position.set(cx + r - 0.6, 2.4, cz + r - 0.6); scene.add(lampG);
+    addGlow(cx + r - 0.6, 2.5, cz + r - 0.6, 0xffb13c, 1.6, 0.4);
+    if (withTree) tree(cx - r + 1.2, cz - r + 1.2, 0.9);
+  }
+  // Props along a path: pots, lamps, crates (thin posts skip colliders).
+  function addStreetProps(x1, z1, x2, z2, step = 5) {
+    const dx = x2 - x1, dz = z2 - z1, len = Math.hypot(dx, dz), n = Math.max(2, Math.round(len / step));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, px = x1 + dx * t + (R() - 0.5) * 1.2, pz = z1 + dz * t + (R() - 0.5) * 1.2;
+      const k = i % 3;
+      if (k === 0) pot(px, pz);
+      else if (k === 1) {
+        cyl(0.09, 0.12, 1.8, 0x4a3220, px, pz);
+        const lg = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8),
+          getMaterial({ color: 0xffe9a8, emissive: 0xffb13c, emissiveIntensity: 1.6 }));
+        lg.position.set(px, 1.95, pz); scene.add(lg);
+        addGlow(px, 2, pz, 0xffb13c, 1.3, 0.35);
+      } else box(0.6, 0.6, 0.6, 0x9a6a35, px, pz, 0, R() * 0.8);
+    }
+  }
+  // Ruin: broken wall stubs + rubble (colliders on stubs only).
+  function addRuinCluster(cx, cz, ry = 0) {
+    const c = Math.cos(ry), s = Math.sin(ry);
+    const L = (lx, lz) => [cx + lx * c - lz * s, cz + lx * s + lz * c];
+    [[-2, 0, 1.8], [0.5, 0.5, 1.1], [2.5, -0.5, 2.2]].forEach(([lx, lz, h]) => {
+      const [wx, wz] = L(lx, lz);
+      box(1.4, h, 1.2, 0xffffff, wx, wz, 0, ry, 1.2, T_stone('#a5947a', '#877757'));
+    });
+    for (let i = 0; i < 5; i++) scatterRock(cx + (R() - 0.5) * 7, cz + (R() - 0.5) * 7, 0.3 + R() * 0.4);
+  }
+  // Palm tree: tall trunk + frond crown + nuts (collider included).
+  function palm(x, z, s = 1) {
+    cyl(0.14 * s, 0.22 * s, 4.6 * s, 0xffffff, x, z, 0, 8, T_wood('#7a5a35'));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const fr = new THREE.Mesh(new THREE.PlaneGeometry(2.4 * s, 0.7 * s),
+        getMaterial({ color: 0x2f7a3e, roughness: 0.9, side: 2 }));
+      fr.position.set(x + Math.cos(a) * 1.1 * s, 4.6 * s, z + Math.sin(a) * 1.1 * s);
+      fr.rotation.set(-0.5, -a + Math.PI / 2, 0, 'YXZ');
+      fr.castShadow = true; scene.add(fr);
+    }
+    const nut = new THREE.Mesh(new THREE.SphereGeometry(0.18 * s, 8, 8),
+      getMaterial({ color: 0x6b4a22, roughness: 0.9 }));
+    nut.position.set(x + 0.2 * s, 4.3 * s, z); scene.add(nut);
+    H.colliders.push({ x, z, r: 0.5 * s });
+  }
+
   // ---------- collectible mesh ----------
   const COLLECT_COLORS = { 1: 0xcf6b2e, 2: 0xe8c547, 3: 0x4aa3df, 4: 0xb678e8 };
   const COLLECT_GEO = { 1: 'tablet', 2: 'scroll', 3: 'piece', 4: 'shard' };
@@ -710,7 +835,41 @@ export function buildWorld(THREE, scene, level) {
     H.colliders.push({ x: 28, z: -10, r: 1.9 });
     addLandmark({ x: 26, z: 0, r: 4.5, icon: '🧱', title: 'BRICK WORKSHOPS',
       fact: 'Kilns fired the standard-sized bricks that built the whole city.', signY: 4.6 });
-    // ---- market extras: trade tables, baskets ----
+    // ---- SLICE 2: north-east residential block + courtyard + well ----
+    houseV(26, 10, { h: 3, c: 0xa56635 });
+    houseV(30, 14, { h: 2.7, c: 0xb5763f, roof: 'pyr' });
+    houseV(29, 21, { h: 3.1, c: 0xc08a55 });
+    addCourtyard(10, 25, 3.5);
+    cyl(0.9, 1, 1, 0xffffff, 20, 24, 0, 12, T_stone('#7a5a3a', '#5a4632'));
+    H.colliders.push({ x: 20, z: 24, r: 1.2 });
+    // ---- SLICE 2: south-east storage row ----
+    houseV(16, -24, { w: 5, h: 3, d: 4, c: 0xa56635 });
+    houseV(24, -24, { w: 5, h: 2.7, d: 4, c: 0xb5763f, roof: 'pyr' });
+    pot(19, -22, 0xb5542d, 1.4); pot(21, -22.5, 0x8a5a35, 1.3); pot(20, -26, 0xb5542d, 1.2);
+    cart(12, -20, -0.4);
+    // ---- SLICE 2: west drain-side houses ----
+    houseV(-22, 2, { h: 2.8, c: 0xb5763f });
+    houseV(-22, -6, { h: 3.1, c: 0xa56635, roof: 'pyr' });
+    // ---- SLICE 2: south market extension stalls ----
+    stall(-13, 17, 0xe8a13c, 0.12); stall(-10, 15, 0x3d7bd9, -0.12);
+    // ---- SLICE 2: street life props ----
+    addStreetProps(12, -6, 12, 2);
+    addStreetProps(-20, 8, -12, 8);
+    addStreetProps(-2, 8, 6, 8);
+    // ---- SLICE 2: ruins + scatter inside walls ----
+    addRuinCluster(-28, 24, 0.2);
+    addRuinCluster(30, -20, -0.3);
+    [[30, 28], [-28, 20], [14, -20], [-14, 30], [8, -30], [-30, -24]].forEach(([x, z]) => scatterRock(x, z, 0.5 + R() * 0.6));
+    [[24, 26], [-24, 16], [16, -18], [-18, -18], [6, 30], [-6, -30]].forEach(([x, z]) => scatterBush(x, z, 0.7 + R() * 0.5));
+    for (let gi = 0; gi < 15; gi++) scatterGrass(-28 + gi * 4, 32, 0.7 + R() * 0.8);
+    for (let gi = 0; gi < 12; gi++) scatterGrass(-32, -18 + gi * 4, 0.7 + R() * 0.8);
+    for (let gi = 0; gi < 8; gi++) scatterGrass(30 + R() * 4, -16 + gi * 4, 0.7 + R() * 0.8);
+    // ---- SLICE 2: distant settlement ring (outside walls, no colliders) ----
+    [[-52, 8], [-48, 22], [-54, -10], [52, 14], [48, -18], [56, -2], [-8, 52], [12, 54], [-20, -52], [6, -54], [24, 50], [-30, 48]].forEach(([x, z], i) => {
+      distantHouse(x, z, 5 + (i % 3), 3 + (i % 2), 4 + ((i + 1) % 3), i);
+    });
+    [[-58, 0], [58, 8], [0, 60], [-8, -60], [20, -58], [-40, 40], [42, 38]].forEach(([x, z]) => scatterTree(x, z, 1.2 + R() * 0.6));
+    addRuinCluster(-58, -20, 0.5);
     box(1.5, 0.7, 1, 0x9a6a35, -7, 1.5, 0, 0.1, 0.9);
     box(1.5, 0.7, 1, 0x8a5a35, -4, 1, 0, -0.15, 0.9);
     cyl(0.45, 0.35, 0.7, 0xb5894e, -5.5, 0.2, 0);
@@ -907,6 +1066,45 @@ export function buildWorld(THREE, scene, level) {
     // can trap the player between trunks). All >=4 apart, off all paths.
     [[-20, -2], [-16, 2], [-20, 12], [-10, 14], [2, 16], [20, 12], [20, 6], [20, -2]]
       .forEach(([x, z]) => tree(x, z, 0.9 + R() * 0.3));
+    // ---- SLICE 2: east dorm court (rooms + courtyard) ----
+    houseV(30, 10, { w: 3.5, h: 2.5, d: 3, c: 0xa5824f });
+    houseV(26, 14, { w: 3, h: 2.4, d: 3, c: 0xbf9f6a });
+    addCourtyard(31, 4, 2.5, false);
+    // ---- SLICE 2: west study cells ----
+    houseV(-28, -6, { w: 2.2, h: 2.2, d: 2.4, c: 0xcbb27f, r: 1.5 });
+    houseV(-28, 0, { w: 2.2, h: 2.4, d: 2.4, c: 0xbf9f6a, r: 1.5 });
+    // ---- SLICE 2: north great stupa court ----
+    cyl(1.6, 2, 2.4, 0xffffff, 0, -33, 0, 14, T_stone('#d9c48f', '#b3a071'));
+    H.colliders.push({ x: 0, z: -33, r: 2.2 });
+    cyl(0.1, 0.12, 2.6, 0x6a4a2a, 0, -33, 2.4);
+    const umb = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.7, 10),
+      getMaterial({ color: 0xffd23e, emissive: 0xcc8a00, emissiveIntensity: 0.6 }));
+    umb.position.set(0, 4, -33); scene.add(umb);
+    for (let ri = 0; ri < 8; ri++) {
+      const a = (ri / 8) * Math.PI * 2;
+      cyl(0.09, 0.11, 1.1, 0x9a9a9a, Math.cos(a) * 3.4, -33 + Math.sin(a) * 3.4);
+    }
+    addLandmark({ x: 0, z: -33, r: 4.5, icon: '🛕', title: 'GREAT STUPA',
+      fact: 'Towering stupas held sacred relics and marked holy ground.', signY: 6 });
+    // ---- SLICE 2: south arrival stalls ----
+    stall(-6, 30, 0x3d7bd9, 0.1); stall(6, 30, 0xe8a13c, -0.1);
+    // ---- SLICE 2: street life + scatter ----
+    addStreetProps(0, -18, 0, -30);
+    addStreetProps(21.5, -6, 21.5, 12);
+    [[-10, -20], [10, -20], [-24, -10], [24, 18]].forEach(([x, z]) => scatterRock(x, z, 0.4 + R() * 0.5));
+    [[-6, 16], [8, 18], [-16, -2], [16, 8]].forEach(([x, z]) => scatterBush(x, z, 0.7 + R() * 0.5));
+    for (let gi = 0; gi < 12; gi++) scatterGrass(-30 + gi * 5.5, 35, 0.7 + R() * 0.7);
+    // ---- SLICE 2: distant monastery ring (outside walls) ----
+    [[-50, 10], [-46, -14], [50, 6], [46, -12], [8, 54], [-12, 52], [52, -30], [-52, -28]].forEach(([x, z], i) => {
+      distantHouse(x, z, 6 + (i % 3) * 2, 3.5 + (i % 2), 5, i);
+    });
+    [[-44, 20], [44, 16], [20, 48], [-24, -44]].forEach(([x, z]) => {
+      cyl(1.2, 1.5, 1.8, 0xd9c48f, x, z);
+      const tip2 = new THREE.Mesh(new THREE.ConeGeometry(0.8, 1.2, 8),
+        getMaterial({ color: 0xa5824f, roughness: 0.8 }));
+      tip2.position.set(x, 2.7, z); scene.add(tip2);
+    });
+    [[-56, -4], [56, -2], [-4, 58], [6, -58]].forEach(([x, z]) => scatterTree(x, z, 1.2 + R() * 0.5));
     // ---- READING GARDEN — hedges, pond, benches, lanterns ----
     [[-4, 21], [0, 21], [4, 21]].forEach(([hx, hz]) => {
       box(3, 1, 1, 0x2f7a3e, hx, hz, 0, 0, 1.3);
@@ -1081,6 +1279,44 @@ export function buildWorld(THREE, scene, level) {
     box(0.8, 0.6, 0.8, 0xababab, -11.2, 1.6, 0, -0.3);
     addLandmark({ x: -12, z: 2, r: 3.6, icon: '🗿', title: 'SCULPTOR’S WORKSHOP',
       fact: 'Master carvers shaped gods, dancers and guardians from plain rock.', signY: 4.4 });
+    // ---- SLICE 2: west artisan street (more workshops) ----
+    [[-20, -2], [-20, 6]].forEach(([sx, sz]) => {
+      [[-1.5, -1], [1.5, -1], [-1.5, 1], [1.5, 1]].forEach(([ox, oz]) =>
+        cyl(0.12, 0.14, 2.2, 0x4a3220, sx + ox, sz + oz));
+      box(4.2, 0.25, 3.2, 0xffffff, sx, sz, 2.2, 0, 0, T_wood('#8a5a2e'));
+      box(1.4, 0.7, 0.9, 0xffffff, sx, sz, 0, 0.15, 1.2, T_wood('#9a6a35'));
+    });
+    // ---- SLICE 2: temple tank (stepped water court) ----
+    box(7, 0.5, 0.8, 0xffffff, -8, -10.6, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
+    box(7, 0.5, 0.8, 0xffffff, -8, -17.4, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
+    box(0.8, 0.5, 7.6, 0xffffff, -11.4, -14, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
+    box(0.8, 0.5, 7.6, 0xffffff, -4.6, -14, 0, 0, 0, T_stone('#c09a55', '#9c7c48'));
+    const tankW = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.4, 5.4),
+      getMaterial({ color: 0x2e8fc4, roughness: 0.15, metalness: 0.2 }));
+    tankW.position.set(-8, 0.3, -14); scene.add(tankW);
+    box(2.4, 0.25, 0.7, 0xffffff, -8, -10.2, 0.1, 0, 0, T_stone('#c09a55', '#9c7c48'));
+    H.colliders.push({ x: -8, z: -14, r: 4 });
+    addLandmark({ x: -8, z: -14, r: 5, icon: '🛁', title: 'TEMPLE TANK',
+      fact: 'Devotees bathed in temple tanks before entering to pray.', signY: 4.6 });
+    // ---- SLICE 2: palm grove + brahmin quarter ----
+    palm(24, 20, 1); palm(28, 24, 1.1); palm(20, 26, 0.9);
+    houseV(-13, -24, { h: 2.7, c: 0xc9a05e });
+    houseV(-3, -27, { h: 2.9, c: 0xd9b06a });
+    // ---- SLICE 2: street life + scatter ----
+    addStreetProps(4, -18, 4, -8);
+    addStreetProps(24, -14, 32, 8);
+    [[-24, -8], [24, -20], [-6, 18]].forEach(([x, z]) => scatterRock(x, z, 0.4 + R() * 0.5));
+    [[10, 14], [-4, 4], [20, 12]].forEach(([x, z]) => scatterBush(x, z, 0.7 + R() * 0.5));
+    for (let gi = 0; gi < 12; gi++) scatterGrass(-28 + gi * 5, -32, 0.7 + R() * 0.7);
+    // ---- SLICE 2: distant gopuram silhouettes + settlement ring ----
+    [[-52, -18], [52, 12]].forEach(([gx, gz], i) => {
+      box(6, 8 + i * 2, 5, 0xc09a55, gx, gz, 0, 0, 0);
+      box(4, 4, 3.5, 0xb5822e, gx, gz, 8 + i * 2);
+    });
+    [[-48, 20], [48, -20], [-20, 54], [16, 52]].forEach(([x, z], i) => {
+      distantHouse(x, z, 5 + (i % 2) * 2, 3, 4, i);
+    });
+    [[-58, 0], [58, 4]].forEach(([x, z]) => scatterTree(x, z, 1.2 + R() * 0.5));
     // ---- streets: temple axis, market row, lanes ----
     street(0, -20, 0, 22, 3.5);
     street(14, 10, 22, 10, 3); // east bank only — the west stretch would float over the sea
@@ -1343,12 +1579,47 @@ export function buildWorld(THREE, scene, level) {
     for (let i = 0; i < 6; i++) tree(-4 + i * 2.6, 12, 0.7); // 2.6 spacing: gaps stay walkable
     stall(0, 6, 0xd97b2e); pot(1, 7); pot(-1, 7);
     banner(-6, 0, 0xd94f3d); banner(6, 0, 0xffd23e);
+    // ---- SLICE 2: second barracks row + courtyard ----
+    houseV(12, 24, { w: 4, h: 2.8, d: 3.5, c: 0xb5884a });
+    houseV(18, 24, { w: 4, h: 2.6, d: 3.5, c: 0xc08a4e });
+    addCourtyard(15, 19, 3);
+    // ---- SLICE 2: ruined bastion (south-west) ----
+    addRuinCluster(-28, 0, 0.1);
+    // ---- SLICE 2: north pines ----
+    tree(16, -30, 1); tree(-16, -30, 1);
+    // ---- SLICE 2: inner-court market stalls + banner row ----
+    stall(-4, -2, 0x3d7bd9, 0.1); stall(4, -2, 0xd94f3d, -0.1);
+    [[-2.5, -12], [2.5, -12], [-2.5, -6], [2.5, -6]].forEach(([bx, bz]) => banner(bx, bz, (bx + bz) % 2 ? 0xd94f3d : 0xffd23e));
+    // ---- SLICE 2: barrels, crates, shields ----
+    [[-22, 10], [22, -12], [10, -19]].forEach(([bx, bz]) => {
+      cyl(0.5, 0.55, 0.9, 0x7a5228, bx, bz);
+      box(0.7, 0.7, 0.7, 0x9a6a35, bx + 1.1, bz + 0.3, 0, 0.4);
+    });
+    [[-9, 5.4], [-7, 5.4]].forEach(([sx, sz]) => {
+      const sh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 12),
+        getMaterial({ color: 0x8a2a35, roughness: 0.6, metalness: 0.3 }));
+      sh.rotation.x = Math.PI / 2; sh.position.set(sx, 1.2, sz); scene.add(sh);
+    });
+    // ---- SLICE 2: rubble + grass along walls ----
+    [[-14, -20], [14, -20], [-28, 14], [28, 12]].forEach(([x, z]) => scatterRock(x, z, 0.5 + R() * 0.6));
+    [[-6, 22], [6, 22], [-24, -14], [24, -14]].forEach(([x, z]) => scatterBush(x, z, 0.7 + R() * 0.5));
+    for (let gi = 0; gi < 10; gi++) scatterGrass(-28 + gi * 6, 32, 0.7 + R() * 0.7);
+    for (let gi = 0; gi < 8; gi++) scatterGrass(gi % 2 ? 30 : -30, -14 + gi * 4, 0.7 + R() * 0.7);
+    // ---- SLICE 2: distant fortress silhouette + watch fires (outside bounds) ----
+    box(24, 12, 8, 0x8a6a55, 0, -72, 0, 0, 0);
+    [[-14, -72], [14, -72]].forEach(([tx, tz]) => {
+      cyl(3, 3.6, 16, 0x8a6a55, tx, tz);
+    });
+    addGlow(-14, 17, -72, 0xff9a2e, 4, 0.5);
+    addGlow(14, 17, -72, 0xff9a2e, 4, 0.5);
+    [[-60, 10], [60, -6], [30, 55], [-35, 50]].forEach(([x, z]) => scatterTree(x, z, 1.3 + R() * 0.6));
     torch(-13, -16); torch(13, -16); torch(0, -19);
     P.items = [[0, -15, 'shard'], [10, 0, 'shard'], [-10, 0, 'shard'], [0, -8, 'shard']];
     P.gate = [0, -17]; P.seal = [0, -11]; P.portal = [8, -17];
   }
 
   H.bounds = P.bounds || 24;
+  buildScatter(); // bake all instanced scatter (visual only, no colliders)
 
   // Shadow frustum hugs the real playable bounds (not a fixed guess):
   // tighter texel density + bias tuned once here for every level.

@@ -308,7 +308,46 @@ export class Game {
       new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xaa7700, emissiveIntensity: 0.6 }));
     con.position.set(0, 0.7, -6); this.scene.add(con);
     this.finalConsole = con;
-    this.world.dynamics.push((dt, t) => { this.finalPillars.forEach((s, i) => { s.rotation.y += dt * (1 + i * 0.2); s.position.y = 3.6 + Math.sin(t * 2 + i) * 0.15; }); });
+    // ---- SLICE 2 chamber dressing (visual only — no logic touched) ----
+    const outerFloor = new THREE.Mesh(new THREE.RingGeometry(20, 30, 40),
+      new THREE.MeshStandardMaterial({ color: 0x241a4e, roughness: 0.7 }));
+    outerFloor.rotation.x = -Math.PI / 2; outerFloor.position.y = -0.01; this.scene.add(outerFloor);
+    for (let ci = 0; ci < 12; ci++) { // distant colonnade ring (beyond reach)
+      const a = (ci / 12) * Math.PI * 2;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 7, 8),
+        new THREE.MeshStandardMaterial({ color: 0x6a5a9a, roughness: 0.7 }));
+      col.position.set(Math.cos(a) * 24, 3.5, Math.sin(a) * 24); this.scene.add(col);
+    }
+    const eraCols = [0xcf6b2e, 0xe8c547, 0x4aa3df, 0xb678e8];
+    for (let bi = 0; bi < 4; bi++) { // era banners
+      const a = (bi / 4) * Math.PI * 2 + Math.PI / 4;
+      const bx = Math.cos(a) * 16, bz = Math.sin(a) * 16;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 5, 8),
+        new THREE.MeshStandardMaterial({ color: 0x3a2f5a, roughness: 0.7 }));
+      pole.position.set(bx, 2.5, bz); this.scene.add(pole);
+      const ban = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.6),
+        new THREE.MeshStandardMaterial({ color: eraCols[bi], emissive: eraCols[bi], emissiveIntensity: 0.35, side: THREE.DoubleSide }));
+      ban.position.set(bx, 3.6, bz); ban.rotation.y = -a; this.scene.add(ban);
+      this.world.colliders.push({ x: bx, z: bz, r: 0.4 });
+    }
+    const pedTops = [0xcf6b2e, 0xe8c547, 0x4aa3df, 0xb678e8, 0xffe066, 0x35e0ff, 0xd94f3d, 0x7dff9a];
+    this.finalRelics = [];
+    for (let pi = 0; pi < 8; pi++) { // museum pedestals with mini relics
+      const a = (pi / 8) * Math.PI * 2 + Math.PI / 8;
+      const px = Math.cos(a) * 13.5, pz = Math.sin(a) * 13.5;
+      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 1.1, 10),
+        new THREE.MeshStandardMaterial({ color: 0xd9b06a, roughness: 0.6 }));
+      ped.position.set(px, 0.55, pz); ped.castShadow = true; this.scene.add(ped);
+      const relic = new THREE.Mesh(new THREE.OctahedronGeometry(0.32),
+        new THREE.MeshStandardMaterial({ color: pedTops[pi], emissive: pedTops[pi], emissiveIntensity: 0.9, roughness: 0.3 }));
+      relic.position.set(px, 1.5, pz); this.scene.add(relic);
+      this.finalRelics.push(relic);
+      this.world.colliders.push({ x: px, z: pz, r: 0.9 });
+    }
+    const timeline = new THREE.Mesh(new THREE.TorusGeometry(11.5, 0.12, 8, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+    timeline.rotation.x = Math.PI / 2; timeline.position.y = 0.04; this.scene.add(timeline);
+    this.world.dynamics.push((dt, t) => { this.finalPillars.forEach((s, i) => { s.rotation.y += dt * (1 + i * 0.2); s.position.y = 3.6 + Math.sin(t * 2 + i) * 0.15; }); (this.finalRelics || []).forEach((r, i) => { r.rotation.y += dt * 1.5; r.position.y = 1.5 + Math.sin(t * 2 + i) * 0.08; }); });
     this.player = createPlayer(THREE, this.scene, this.world.spawn);
     this.player.onStep = () => AudioSys.step();
     this.player.onJump = () => AudioSys.jump();
