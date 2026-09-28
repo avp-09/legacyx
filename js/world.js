@@ -788,7 +788,7 @@ export function buildWorld(THREE, scene, level) {
     P.bounds = 40;
     // Mohenjo-daro: brick houses grid, Great Bath, granary, drains
     const brick = 0xb5763f, brick2 = 0xa56635;
-    const houses = [[-14, -4], [-14, 4], [-7, -10], [9, -8], [14, 2], [12, 10], [-4, 12], [-13, 12],
+    const houses = [[-14, -4], [-14, 4], [7, -13], [9, -8], [14, 2], [12, 10], [-4, 12], [-13, 12],
       [8, 18], [-8, 18], [20, -6], [20, 2]];
     houses.forEach(([x, z], i) => {
       const c = i % 2 ? brick : brick2;
@@ -838,15 +838,20 @@ export function buildWorld(THREE, scene, level) {
       if (bathSpot && bathSpot.url) {
         AssetManager.resolveHero(bathSpot.id, bathSpot.url).then(hero => {
           if (!hero) return; // fallback stays visible
+          // Fit: uniform scale to a 9.0m square footprint centered at (-3,-8).
+          // Derived from measured bbox (1.89 x 0.43 x 1.90) and district
+          // constraints: west open (house moved to (7,-13)), east tablet at
+          // x=3.4 needs ~2 clearance, seal pedestal at (0,-14) needs room
+          // south, market stalls clear north. Collider stays at (-2,-8) r4.2.
           const bb = new THREE.Box3().setFromObject(hero);
           const size = bb.getSize(new THREE.Vector3());
-          const s = Math.min(7.4 / (size.x || 1), 7.4 / (size.z || 1));
+          const s = Math.min(9.0 / (size.x || 1), 9.0 / (size.z || 1));
           hero.scale.setScalar(s);
           const bb2 = new THREE.Box3().setFromObject(hero);
           hero.position.set(
-            bathSpot.pos[0] - (bb2.min.x + bb2.max.x) / 2,
+            -3 - (bb2.min.x + bb2.max.x) / 2,
             -bb2.min.y,
-            bathSpot.pos[2] - (bb2.min.z + bb2.max.z) / 2
+            -8 - (bb2.min.z + bb2.max.z) / 2
           );
           hero.traverse(o => { // PBR fix: export is raw white + metal=1 with no
             // envmap/textures, which renders as black chrome or chalk. Keep the
@@ -861,11 +866,11 @@ export function buildWorld(THREE, scene, level) {
             }
           });
           // still pool water inside the hero basin (reuses the staged water look)
-          const heroWater = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.3, 2.6),
+          const heroWater = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.3, 3.0),
             getMaterial({ color: 0x2ea8d4, roughness: 0.1, metalness: 0.25, emissive: 0x0a4a66, emissiveIntensity: 0.35 }));
-          heroWater.position.set(-2, 0.4, -8);
+          heroWater.position.set(-3, 0.45, -8);
           scene.add(heroWater);
-          H.dynamics.push((dt, t) => { heroWater.position.y = 0.4 + Math.sin(t * 1.6) * 0.03; });
+          H.dynamics.push((dt, t) => { heroWater.position.y = 0.45 + Math.sin(t * 1.6) * 0.03; });
           scene.add(hero);
           bathGroup.visible = false;
         }).catch(() => { /* fallback stays visible */ });

@@ -19,7 +19,7 @@ export const HERO_BASE_URL = null;
 // naming); spots without url keep the procedural fallback.
 export const HERO_SPOTS = {
   1: [
-    { id: 'indus-great-bath', pos: [-2, 0, -8], size: [9, 4, 7], fallback: 'Great Bath (world.js L1)', url: 'assets/models/indus/greatbath.glb' }
+    { id: 'indus-great-bath', pos: [-2, 0, -8], size: [9, 2.5, 9], fallback: 'Great Bath (world.js L1)', url: 'assets/models/indus/greatbath.glb' }
   ],
   2: [
     { id: 'nalanda-library', pos: [0, 0, 12], size: [8, 4, 6], fallback: 'Great Library, enterable (world.js L2)' }
