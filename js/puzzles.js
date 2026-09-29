@@ -1,5 +1,5 @@
 // Final puzzles per level — DOM overlays with tactile interactions.
-// L1 drainage pipes · L2 library order · L3 temple stack · L4 four trials · L5 newspaper layout
+// L1 drainage pipes · L2 temple stack · L3 four trials · final newspaper layout
 import { AudioSys } from './audio.js';
 
 function shell(title, inner) {
@@ -13,9 +13,8 @@ function close() { document.getElementById('puzzle-modal').classList.add('hidden
 
 export function openPuzzle(levelId, { onSolve }) {
   if (levelId === 1) return drainage(onSolve);
-  if (levelId === 2) return library(onSolve);
-  if (levelId === 3) return temple(onSolve);
-  if (levelId === 4) return fort(onSolve);
+  if (levelId === 2) return temple(onSolve);
+  if (levelId === 3) return fort(onSolve);
   return press(onSolve);
 }
 
@@ -51,27 +50,7 @@ function drainage(onSolve) {
   refresh();
 }
 
-// ---- L2: tap scrolls in the order scholars would shelve them ----
-function library(onSolve) {
-  const items = ['🌟 Astronomy', '🌿 Medicine', '🕉️ Philosophy', '📐 Logic'];
-  const order = [2, 0, 3, 1]; // philosophy → astronomy → logic → medicine (displayed as puzzle lore)
-  let prog = 0;
-  shell('📚 Library Puzzle', `
-    <p class="p-sub">Shelve the scrolls in the order of the ancient curriculum:<br><b>Philosophy → Astronomy → Logic → Medicine</b></p>
-    <div class="tile-row">${items.map((t, i) => `<button class="tile" data-i="${i}">${t}</button>`).join('')}</div>
-    <p class="p-hint" id="lib-hint">Tap the scrolls in order… (0/${items.length})</p>`);
-  const btns = [...document.querySelectorAll('.tile')];
-  btns.forEach(b => b.addEventListener('click', () => {
-    const i = +b.dataset.i;
-    if (i === order[prog]) {
-      b.classList.add('ok'); b.disabled = true; prog++; AudioSys.collect();
-      document.getElementById('lib-hint').textContent = `Beautiful… (${prog}/${items.length})`;
-      if (prog === items.length) { AudioSys.seal(); setTimeout(() => { close(); onSolve(); }, 800); }
-    } else { AudioSys.fail(); b.classList.add('shake'); setTimeout(() => b.classList.remove('shake'), 400); }
-  }));
-}
-
-// ---- L3: stack temple parts base→finial ----
+// ---- L2: stack temple parts base→finial ----
 function temple(onSolve) {
   const parts = [
     { e: '🧱', n: 'Foundation' }, { e: '🏛️', n: 'Pillars' },
@@ -98,7 +77,7 @@ function temple(onSolve) {
   }));
 }
 
-// ---- L4: four quick trials ----
+// ---- L3: four quick trials ----
 function fort(onSolve) {
   let step = 0;
   const steps = [

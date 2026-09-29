@@ -22,13 +22,10 @@ export const HERO_SPOTS = {
     { id: 'indus-great-bath', pos: [-2, 0, -8], size: [9, 2.5, 9], fallback: 'Great Bath (world.js L1)', url: 'assets/models/indus/greatbath.glb' }
   ],
   2: [
-    { id: 'nalanda-library', pos: [0, 0, 12], size: [8, 4, 6], fallback: 'Great Library, enterable (world.js L2)' }
+    { id: 'chola-temple', pos: [0, 0, -14], size: [8, 13, 8], fallback: 'Sanctum + vimana + finial (world.js L2)', url: 'assets/models/chola/chola_temple.glb' }
   ],
   3: [
-    { id: 'chola-temple', pos: [0, 0, -14], size: [8, 13, 8], fallback: 'Sanctum + vimana + finial (world.js L3)' }
-  ],
-  4: [
-    { id: 'fort-outer-gate', pos: [0, 0, 26], size: [12, 9, 4], fallback: 'Twin-tower outer gate (world.js L4)' }
+    { id: 'fort-outer-gate', pos: [0, 0, 26], size: [12, 9, 4], fallback: 'Twin-tower outer gate (world.js L3)' }
   ],
   5: [
     { id: 'final-console', pos: [0, 0, -6], size: [2, 2, 1], fallback: 'Golden console (game.js loadFinalChamber)' }

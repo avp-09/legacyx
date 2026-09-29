@@ -33,7 +33,7 @@
       <div class="hud-right">
         <span class="hud-pill" id="hud-points">⭐ 0</span>
         <span class="hud-pill" id="hud-art">🏺 0</span>
-        <span class="hud-pill" id="hud-seals">🔱 0/4</span>
+        <span class="hud-pill" id="hud-seals">🔱 0/3</span>
         <button class="icon-btn" id="btn-inv-hud" title="Inventory (I)">🎒</button>
         <button class="icon-btn" id="btn-journal-hud" title="Quest Journal (J)">📜</button>
         <button class="icon-btn" id="btn-kalam-hud" title="Ask Kalam">🤖</button>
@@ -125,7 +125,7 @@
     <div id="kalam-log"><div class="kalam-msg kalam">🤖 Kalam: Namaste! Ask me anything about history!</div></div>
     <div class="kalam-chips">
       <button class="kalam-chip">Why were drainage systems important?</button>
-      <button class="kalam-chip">Why is Nalanda important?</button>
+      <button class="kalam-chip">How did Chola temples rise so high?</button>
       <button class="kalam-chip">Tell me something interesting</button>
     </div>
     <div class="kalam-row"><input id="kalam-input" placeholder="Ask Kalam…" maxlength="200"><button class="btn primary" id="kalam-ask">Ask</button></div>
@@ -174,6 +174,19 @@
       <div id="disc-title">The Great Bath</div>
       <div id="disc-fact"></div>
     </div>
+  </div>
+</div>
+
+<!-- INTRO CINEMATIC (drop the file at assets/intro/cinematic.gif, .mp4 or .webm) -->
+<div id="screen-intro">
+  <img id="intro-gif" alt="" aria-hidden="true">
+  <video id="intro-video" muted loop playsinline autoplay disablepictureinpicture aria-hidden="true"></video>
+  <div class="intro-shade"></div>
+  <div class="intro-inner">
+    <h1 class="title legacy">LEGACY</h1>
+    <div class="subtitle">THE LIVING CITY</div>
+    <div><button id="btn-start-cinematic" class="btn-cinematic">START GAME</button></div>
+    <div class="intro-hint">WASD + Mouse · E interact · Space jump</div>
   </div>
 </div>
 

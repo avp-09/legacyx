@@ -54,10 +54,9 @@ export async function getHistoricalAnswer(question, context = {}) {
   if (hit) return '🤖 ' + hit.answer;
   const eraHints = {
     1: 'Look around this planned city — its drains, bricks and Great Bath each hide a story. Try asking about drains or seals!',
-    2: 'Nalanda was a great university. Ask me about scholars, the library or the stars!',
-    3: 'The Cholas raised mighty temples. Ask me about temples or Rajaraja!',
-    4: 'This fort guards many secrets. Ask me about Shah Jahan or the Taj Mahal!',
-    5: 'The Final Chamber tests all four eras! Ask me about drains, Nalanda, temples or forts!'
+    2: 'The Cholas raised mighty temples. Ask me about temples or Rajaraja!',
+    3: 'This fort guards many secrets. Ask me about Shah Jahan or the Taj Mahal!',
+    5: 'The Final Chamber tests all three eras! Ask me about drains, temples or forts!'
   };
   return `🤖 Wonderful question! ${eraHints[context.levelId] || 'Indian history is full of wonders — try asking about drains, Nalanda, temples, forts or freedom!'}`;
 }

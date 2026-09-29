@@ -1,39 +1,86 @@
-// Stylized teen adventurer (procedural — no external assets).
+// Chibi adventurer (procedural — no external assets).
+// Look: red cap, long brown hair, white top, red waist sash,
+// olive cargo pants, chunky dark sneakers. Big-head chibi proportions.
 // WASD move relative to camera, Space jump, smooth turn, bob animation.
 export function createPlayer(THREE, scene, spawn = [0, 0, 8]) {
   const g = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xb5773f, roughness: 0.7 });
-  const shirt = new THREE.MeshStandardMaterial({ color: 0xff7a3c, roughness: 0.6 });
-  const pants = new THREE.MeshStandardMaterial({ color: 0x2e4a7a, roughness: 0.7 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0xffd23e, roughness: 0.5, emissive: 0x553300, emissiveIntensity: 0.25 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xf2c09a, roughness: 0.6 });
+  const hairM = new THREE.MeshStandardMaterial({ color: 0x6b3d22, roughness: 0.75 });
+  const capM = new THREE.MeshStandardMaterial({ color: 0xd92632, roughness: 0.55 });
+  const topM = new THREE.MeshStandardMaterial({ color: 0xf6f4ef, roughness: 0.65 });
+  const sashM = new THREE.MeshStandardMaterial({ color: 0xd92632, roughness: 0.6 });
+  const pantsM = new THREE.MeshStandardMaterial({ color: 0x7a8a4d, roughness: 0.8 });
+  const darkM = new THREE.MeshStandardMaterial({ color: 0x2e2e38, roughness: 0.6 });
+  const packM = new THREE.MeshStandardMaterial({ color: 0x4a3230, roughness: 0.8 });
 
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.55, 6, 14), shirt);
-  body.position.y = 0.95; body.castShadow = true; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 20, 16), skin);
-  head.position.y = 1.72; head.castShadow = true; g.add(head);
-  // turban / cap
-  const turban = new THREE.Mesh(new THREE.SphereGeometry(0.30, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), accent);
-  turban.position.y = 1.80; g.add(turban);
-  const jewel = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0x35e0ff, emissive: 0x1899bb, emissiveIntensity: 1.2 }));
-  jewel.position.set(0, 1.86, 0.26); g.add(jewel);
-  // eyes
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
-  [-0.1, 0.1].forEach(x => {
-    const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), eyeMat);
-    e.position.set(x, 1.74, 0.25); g.add(e);
+  const solid = (mesh, x = 0, y = 0, z = 0, parent = g) => {
+    mesh.position.set(x, y, z); mesh.castShadow = true; parent.add(mesh); return mesh;
+  };
+
+  // ---- legs: olive cargo pants + side pockets + straps ----
+  const legGeo = new THREE.CapsuleGeometry(0.11, 0.22, 4, 10);
+  const legL = solid(new THREE.Mesh(legGeo, pantsM), -0.14, 0.32, 0);
+  const legR = solid(new THREE.Mesh(legGeo, pantsM), 0.14, 0.32, 0);
+  [-0.26, 0.26].forEach(x => {
+    solid(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 0.16), pantsM), x, 0.32, 0); // cargo pockets
+    solid(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.24), darkM), Math.sign(x) * 0.14, 0.22, 0); // straps
   });
-  // limbs
-  const armGeo = new THREE.CapsuleGeometry(0.09, 0.5, 4, 8);
-  const legGeo = new THREE.CapsuleGeometry(0.11, 0.5, 4, 8);
-  const armL = new THREE.Mesh(armGeo, shirt); armL.position.set(-0.44, 1.0, 0); armL.castShadow = true; g.add(armL);
-  const armR = new THREE.Mesh(armGeo, shirt); armR.position.set(0.44, 1.0, 0); armR.castShadow = true; g.add(armR);
-  const legL = new THREE.Mesh(legGeo, pants); legL.position.set(-0.16, 0.42, 0); legL.castShadow = true; g.add(legL);
-  const legR = new THREE.Mesh(legGeo, pants); legR.position.set(0.16, 0.42, 0); legR.castShadow = true; g.add(legR);
-  // satchel glow
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.36, 0.18),
-    new THREE.MeshStandardMaterial({ color: 0x7a4a21, roughness: 0.8 }));
-  pack.position.set(0, 1.0, -0.36); g.add(pack);
+  // ---- chunky sneakers: dark with red laces ----
+  [-0.14, 0.14].forEach(x => {
+    solid(new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.13, 0.32), darkM), x, 0.07, 0.04);
+    solid(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.14), sashM), x, 0.14, 0.06); // laces
+  });
+  // ---- torso: white long-sleeve top ----
+  const body = solid(new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.28, 6, 14), topM), 0, 0.72, 0);
+  // ---- arms: white sleeves + skin hands ----
+  const armGeo = new THREE.CapsuleGeometry(0.075, 0.26, 4, 10);
+  const armL = solid(new THREE.Mesh(armGeo, topM), -0.33, 0.7, 0);
+  const armR = solid(new THREE.Mesh(armGeo, topM), 0.33, 0.7, 0);
+  [-0.33, 0.33].forEach(x => solid(new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), skin), x, 0.5, 0));
+  // ---- red waist sash + hanging strip ----
+  const sash = solid(new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.055, 8, 18), sashM), 0, 0.55, 0);
+  sash.rotation.x = Math.PI / 2;
+  solid(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.34, 0.03), sashM), 0.12, 0.36, 0.24);
+  // ---- little backpack ----
+  solid(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.34, 0.16), packM), 0, 0.76, -0.3);
+
+  // ---- big chibi head ----
+  const head = new THREE.Group(); head.position.set(0, 1.12, 0); g.add(head);
+  const hsolid = (mesh, x = 0, y = 0, z = 0) => solid(mesh, x, y, z, head);
+  hsolid(new THREE.Mesh(new THREE.SphereGeometry(0.3, 22, 18), skin));
+  // hair: back mass + long back fall + side locks + bangs
+  const backHair = hsolid(new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 16), hairM), 0, 0.05, -0.09);
+  backHair.scale.set(1, 1.12, 0.92);
+  hsolid(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.52, 0.13), hairM), 0, -0.28, -0.26);
+  hsolid(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.34, 0.12), hairM), -0.28, -0.12, 0.02);
+  hsolid(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.34, 0.12), hairM), 0.28, -0.12, 0.02);
+  [-0.16, 0, 0.16].forEach(x => {
+    const bang = hsolid(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), hairM), x, 0.2, 0.22);
+    bang.scale.set(1, 1.25, 0.6);
+  });
+  // big anime eyes: white + pupils + highlights (kept for blink anim)
+  const eyeL = new THREE.Group(), eyeR = new THREE.Group();
+  eyeL.position.set(-0.11, 0.04, 0.25); eyeR.position.set(0.11, 0.04, 0.25);
+  head.add(eyeL, eyeR);
+  const whiteM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const pupilM = new THREE.MeshBasicMaterial({ color: 0x4a2418 });
+  [eyeL, eyeR].forEach(e => {
+    solid(new THREE.Mesh(new THREE.SphereGeometry(0.075, 14, 12), whiteM), 0, 0, 0, e).castShadow = false;
+    solid(new THREE.Mesh(new THREE.SphereGeometry(0.038, 12, 10), pupilM), 0, -0.008, 0.055, e).castShadow = false;
+    solid(new THREE.Mesh(new THREE.SphereGeometry(0.013, 8, 6), whiteM), 0.014, 0.012, 0.085, e).castShadow = false;
+  });
+  // brows, blush, tiny mouth
+  const browM = new THREE.MeshBasicMaterial({ color: 0x5a3018 });
+  solid(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.018, 0.01), browM), -0.11, 0.15, 0.27, head).castShadow = false;
+  solid(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.018, 0.01), browM), 0.11, 0.15, 0.27, head).castShadow = false;
+  const blushM = new THREE.MeshBasicMaterial({ color: 0xf09090, transparent: true, opacity: 0.85 });
+  solid(new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), blushM), -0.19, -0.04, 0.21, head).castShadow = false;
+  solid(new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), blushM), 0.19, -0.04, 0.21, head).castShadow = false;
+  solid(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.014, 0.01), pupilM), 0, -0.1, 0.285, head).castShadow = false;
+  // ---- red cap: dome + front brim + button ----
+  const turban = hsolid(new THREE.Mesh(new THREE.SphereGeometry(0.315, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2.4), capM), 0, 0.12, -0.02);
+  solid(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.045, 0.24), capM), 0, 0.2, 0.36, head);
+  hsolid(new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), capM), 0, 0.42, -0.02);
 
   g.position.set(spawn[0], spawn[1], spawn[2]);
   scene.add(g);
@@ -100,18 +147,20 @@ export function createPlayer(THREE, scene, spawn = [0, 0, 8]) {
       if (g.position.y <= 0) { g.position.y = 0; g.position.y = 0; state.grounded = true; state.vy = 0; }
     }
     g.rotation.y = state.heading;
-    // run bob + limb swing
+    // run bob + limb swing + blink
     const t = performance.now() / 1000;
     const amp = has ? (state.running ? 0.9 : 0.6) : 0.08;
     const f = has ? (state.running ? 13 : 9) : 2;
-    body.position.y = 0.95 + Math.abs(Math.sin(t * f)) * 0.06 * amp;
-    head.position.y = 1.72 + Math.abs(Math.sin(t * f)) * 0.05 * amp;
-    turban.position.y = 1.80 + Math.abs(Math.sin(t * f)) * 0.05 * amp;
+    body.position.y = 0.72 + Math.abs(Math.sin(t * f)) * 0.05 * amp;
+    head.position.y = 1.12 + Math.abs(Math.sin(t * f)) * 0.045 * amp;
+    turban.position.y = 0.12 + Math.abs(Math.sin(t * f)) * 0.045 * amp;
     armL.rotation.x = Math.sin(t * f) * amp * 0.9;
     armR.rotation.x = -Math.sin(t * f) * amp * 0.9;
     legL.rotation.x = -Math.sin(t * f) * amp * 0.9;
     legR.rotation.x = Math.sin(t * f) * amp * 0.9;
     if (!state.grounded) { armL.rotation.x = -0.7; armR.rotation.x = -0.7; }
+    const blink = (t % 4.2) < 0.12 ? 0.12 : 1; // cute blink every ~4s
+    eyeL.scale.y = blink; eyeR.scale.y = blink;
     blob.position.set(g.position.x, 0.02, g.position.z);
     tmp.copy(g.position);
     return tmp;

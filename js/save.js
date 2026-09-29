@@ -17,6 +17,8 @@ const DEFAULTS = () => ({
 });
 
 // One-time migration for saves from the 5-level era: drop all Level 5 data.
+// Plus 4-era -> 3-era renumber (Nalanda removed): drop old Level 2 data,
+// remap old Chola 3->2 and old Fort 4->3 so earned progress carries over.
 function migrate(d) {
   const keep = (arr) => (arr || []).filter(x => !(String(x).startsWith('5-') || x === 5));
   d.completed = keep(d.completed);
@@ -25,7 +27,21 @@ function migrate(d) {
   for (const k of ['artifacts', 'quizScores', 'stars']) {
     if (d[k] && d[k][5] !== undefined) delete d[k][5];
   }
-  d.unlocked = Math.max(1, Math.min(5, d.unlocked || 1));
+  const fixId = (id) => (id === 3 ? 2 : id === 4 ? 3 : id);
+  d.completed = d.completed.filter(x => x !== 2).map(fixId);
+  d.seals = d.seals.filter(x => x !== 2).map(fixId);
+  d.museum = d.museum
+    .filter(x => !String(x).startsWith('2-'))
+    .map(x => String(x).replace(/^([34])-(.*)$/, (m, a, b) => fixId(+a) + '-' + b));
+  for (const k of ['artifacts', 'quizScores', 'stars']) {
+    if (!d[k]) continue;
+    const v3 = d[k][3], v4 = d[k][4];
+    delete d[k][2]; delete d[k][3]; delete d[k][4];
+    if (v3 !== undefined) d[k][2] = v3;
+    if (v4 !== undefined) d[k][3] = v4;
+  }
+  d.currentLevel = d.currentLevel === 2 ? 1 : fixId(d.currentLevel || 1);
+  d.unlocked = Math.max(1, Math.min(5, fixId(d.unlocked || 1)));
   return d;
 }
 
@@ -63,7 +79,7 @@ export const Save = {
     this.data.stars[levelId] = got >= target ? 3 : got >= Math.ceil(target * 0.6) ? 2 : 1;
     if (got >= target && !this.data.achievements.includes('explorer')) this.data.achievements.push('explorer');
     this.data.unlocked = Math.max(this.data.unlocked, Math.min(5, levelId + 1));
-    if (this.data.seals.length >= 4 && !this.data.achievements.includes('guardian')) this.data.achievements.push('guardian');
+    if (this.data.seals.length >= 3 && !this.data.achievements.includes('guardian')) this.data.achievements.push('guardian');
     this.write();
   },
   completeFinal() {

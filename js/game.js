@@ -38,12 +38,15 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic light response, zero gameplay impact
+    this.renderer.toneMappingExposure = 1.12;
     container.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 300);
     this.clock = new THREE.Clock();
     this.bindInputs();
     this.bindMenuButtons();
+    this.bindIntro(); // cinematic cover over the menu; START reveals existing flow
     this.renderLevelCards(); this.renderMuseum(); this.renderAchv();
     this.applySettings();
     showScreen('screen-menu');
@@ -55,6 +58,43 @@ export class Game {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
     this.loop();
+  }
+
+  // ---------- INTRO CINEMATIC: full-screen cover, existing flow untouched ----------
+  // Media lives at assets/intro/cinematic.(mp4|webm|gif). If none is present
+  // the bronze fallback backdrop + title + START remain fully usable.
+  bindIntro() {
+    const box = document.getElementById('screen-intro');
+    if (!box) return;
+    const gif = document.getElementById('intro-gif');
+    const vid = document.getElementById('intro-video');
+    const show = (el) => { el.style.display = 'block'; };
+    const tryGif = () => {
+      const probe = new Image();
+      probe.onload = () => { gif.src = probe.src; show(gif); };
+      probe.onerror = () => {}; // fallback backdrop stays
+      probe.src = 'assets/intro/cinematic.gif';
+    };
+    const tryVideo = (srcs) => {
+      if (!srcs.length) { tryGif(); return; }
+      vid.onerror = () => { vid.removeAttribute('src'); tryVideo(srcs.slice(1)); };
+      vid.oncanplay = () => show(vid);
+      vid.src = srcs[0];
+      try { const p = vid.play(); if (p) p.catch(() => {}); } catch {}
+    };
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // reduced motion: keep the static bronze backdrop, load nothing animated
+    } else {
+      tryVideo(['assets/intro/cinematic.mp4', 'assets/intro/cinematic.webm']);
+    }
+    const resume = () => { if (vid.src && vid.paused) { try { vid.play().catch(() => {}); } catch {} } };
+    window.addEventListener('pointerdown', resume, { once: true });
+    document.getElementById('btn-start-cinematic').addEventListener('click', () => {
+      AudioSys.init(); AudioSys.click();
+      try { vid.pause(); } catch {}
+      box.classList.add('leaving');
+      setTimeout(() => { box.classList.add('gone'); }, 650);
+    });
   }
 
   // ---------- pretty menu background: slow orbit over Level 1 diorama ----------
@@ -254,7 +294,7 @@ export class Game {
     const body = document.getElementById('journal-body');
     if (!body) return;
     if (this.finalMode || !this.quest) {
-      body.innerHTML = `<div class="inv-row">🏆 <b>Final History Chamber</b> — answer questions from all four eras.</div>`;
+      body.innerHTML = `<div class="inv-row">🏆 <b>Final History Chamber</b> — answer questions from all three eras.</div>`;
       return;
     }
     const lvl = levelById(this.levelId);
@@ -627,7 +667,7 @@ export class Game {
     setTimeout(() => {
       document.getElementById('fade').classList.add('hidden');
       const next = this.levelId + 1;
-      if (next <= 4) this.startLevel(next);
+      if (next <= 3) this.startLevel(next);
       else { this.renderLevelCards(); this.updateMenuSeals(); this.toChronoMap(); toast('🗺️ All seals found! Enter the FINAL HISTORY CHAMBER!', 3600); }
     }, 1100);
   }
@@ -787,7 +827,7 @@ export class Game {
   updateHUD() {
     if (this.finalMode) {
       document.getElementById('hud-mission').textContent = '🏆 FINAL HISTORY CHAMBER — Attempt the console quiz';
-      document.getElementById('hud-progress').textContent = `🔱 Seals ${Save.data.seals.length}/4`;
+      document.getElementById('hud-progress').textContent = `🔱 Seals ${Save.data.seals.length}/3`;
     } else {
       const lvl = levelById(this.levelId);
       document.getElementById('hud-mission').textContent = `🎯 ${this.currentObjective()}`;
@@ -800,7 +840,7 @@ export class Game {
     document.getElementById('hud-points').textContent = `⭐ ${Save.data.historyPoints}`;
     const art = Object.values(Save.data.artifacts).reduce((a, b) => a + b, 0);
     document.getElementById('hud-art').textContent = `🏺 ${art}`;
-    document.getElementById('hud-seals').textContent = `🔱 ${Save.data.seals.length}/4`;
+    document.getElementById('hud-seals').textContent = `🔱 ${Save.data.seals.length}/3`;
   }
 
   checkNewAchievements() {
@@ -823,7 +863,7 @@ export class Game {
     document.getElementById('results-detail').textContent =
       `${lvl.collectible.icon} ${this.found}/${lvl.collectible.target} · Quiz best ${Save.data.quizScores[this.levelId] || 0}/5 · +50 seal bonus`;
     document.getElementById('results-next').textContent =
-      this.levelId < 4 ? `🌀 Enter Portal to ${lvl.portalTo} →` : '🗺️ Return to Chrono Map →';
+      this.levelId < 3 ? `🌀 Enter Portal to ${lvl.portalTo} →` : '🗺️ Return to Chrono Map →';
     document.getElementById('results-modal').classList.remove('hidden');
     AudioSys.success();
   }
@@ -832,9 +872,9 @@ export class Game {
     this.busy = true;
     const art = Object.values(Save.data.artifacts).reduce((a, b) => a + b, 0);
     document.querySelector('#victory-modal .oath').textContent =
-      '“Congratulations! You have recovered all four Time Seals and become a Guardian of Time!”';
+      '“Congratulations! You have recovered all three Time Seals and become a Guardian of Time!”';
     document.getElementById('victory-stats').innerHTML =
-      `TIME SEALS: <b>4/4</b> · ARTIFACTS: <b>${art}</b><br>HISTORY POINTS: <b>${Save.data.historyPoints}</b> · FINAL SCORE: <b>${score}/5</b>`;
+      `TIME SEALS: <b>3/3</b> · ARTIFACTS: <b>${art}</b><br>HISTORY POINTS: <b>${Save.data.historyPoints}</b> · FINAL SCORE: <b>${score}/5</b>`;
     document.getElementById('victory-modal').classList.remove('hidden');
     AudioSys.success();
     setTimeout(() => AudioSys.portal(), 800);
@@ -859,14 +899,14 @@ export class Game {
       wrap.appendChild(card);
     });
     const fin = document.createElement('button');
-    const funlock = Save.data.unlocked >= 5 && Save.data.seals.length >= 4;
+    const funlock = Save.data.unlocked >= 4 && Save.data.seals.length >= 3;
     fin.className = 'level-card final' + (funlock ? ' open' : ' locked');
     fin.innerHTML = `<div class="lc-icon">${funlock ? '🏆' : '🔒'}</div><div class="lc-name">Final History Chamber</div>
-      <div class="lc-era">All four eras united</div>
-      <div class="lc-status">${funlock ? (Save.data.finalDone ? '✅ Guardian of Time!' : '✨ UNLOCKED') : '🔒 Collect 4 seals'}</div>`;
+      <div class="lc-era">All three eras united</div>
+      <div class="lc-status">${funlock ? (Save.data.finalDone ? '✅ Guardian of Time!' : '✨ UNLOCKED') : '🔒 Collect 3 seals'}</div>`;
     fin.addEventListener('click', () => {
       if (funlock) { AudioSys.click(); this.startLevel(5); }
-      else { AudioSys.fail(); toast('🔒 Recover all four Time Seals first!'); }
+      else { AudioSys.fail(); toast('🔒 Recover all three Time Seals first!'); }
     });
     wrap.appendChild(fin);
   }
@@ -906,7 +946,7 @@ export class Game {
 
   updateMenuSeals() {
     document.getElementById('menu-seals').textContent =
-      `🔱 Time Seals: ${Save.data.seals.length}/4 · ⭐ ${Save.data.historyPoints} · 🏺 ${Save.data.museum.length}`;
+      `🔱 Time Seals: ${Save.data.seals.length}/3 · ⭐ ${Save.data.historyPoints} · 🏺 ${Save.data.museum.length}`;
   }
 
   toChronoMap() { this.inGame = false; this.renderLevelCards(); this.updateMenuSeals(); this.menuOrbit(); showScreen('screen-levels'); }
@@ -985,10 +1025,10 @@ export class Game {
       const lvl = levelById(this.levelId);
       document.getElementById('inv-body').innerHTML = `
         <div class="inv-row">⭐ History Points: <b>${Save.data.historyPoints}</b></div>
-        <div class="inv-row">🔱 Time Seals: <b>${Save.data.seals.length}/4</b> ${Save.data.seals.map(s => levelById(s)?.sealName || '').join(' ')}</div>
+        <div class="inv-row">🔱 Time Seals: <b>${Save.data.seals.length}/3</b> ${Save.data.seals.map(s => levelById(s)?.sealName || '').join(' ')}</div>
         <div class="inv-row">${lvl && !this.finalMode ? lvl.collectible.icon + ' ' + lvl.collectible.name + 's: <b>' + this.found + '/' + lvl.collectible.target + '</b>' : '🏆 Final Chamber'}</div>
         <div class="inv-row">🏺 Museum artifacts: <b>${Save.data.museum.length}</b></div>
-        <div class="inv-row">🗺️ Levels complete: <b>${Save.data.completed.length}/4</b></div>`;
+        <div class="inv-row">🗺️ Levels complete: <b>${Save.data.completed.length}/3</b></div>`;
     }
   }
 
@@ -1017,7 +1057,7 @@ export class Game {
     }));
     document.getElementById('btn-resume').addEventListener('click', () => {
       AudioSys.click();
-      const id = Math.min(Save.data.unlocked, 4);
+      const id = Math.min(Save.data.unlocked, 3);
       if (this.inGame) this.togglePause(false);
       else this.startLevel(Save.data.currentLevel && Save.data.currentLevel <= Save.data.unlocked ? Save.data.currentLevel : id);
     });
@@ -1031,7 +1071,7 @@ export class Game {
     // results
     document.getElementById('results-next').addEventListener('click', () => {
       AudioSys.click(); document.getElementById('results-modal').classList.add('hidden'); this.busy = false; this.renderLevelCards();
-      if (this.levelId < 4) this.enterPortal();
+      if (this.levelId < 3) this.enterPortal();
       else this.toChronoMap();
     });
     document.getElementById('results-map').addEventListener('click', () => {
